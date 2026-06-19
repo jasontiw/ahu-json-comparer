@@ -48,6 +48,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0d1117; colo
 .toolbar input[type="text"] { padding: 5px 10px; border-radius: 6px; border: 1px solid #30363d; background: #0d1117; color: #e6edf3; font-size: 13px; font-family: 'Cascadia Code', 'JetBrains Mono', 'Consolas', monospace; outline: none; width: 280px; }
 .toolbar input[type="text"]:focus { border-color: #58a6ff; }
 .toolbar input[type="text"]::placeholder { color: #484f58; font-family: 'Segoe UI', system-ui, sans-serif; }
+
 .toolbar button, .tb-btn { padding: 5px 14px; border-radius: 6px; border: 1px solid #30363d; background: #21262d; color: #c9d1d9; font-size: 12px; font-weight: 500; cursor: pointer; font-family: inherit; }
 .toolbar button:hover, .tb-btn:hover { background: #30363d; }
 .toolbar button:active, .tb-btn:active { background: #484f58; }
@@ -143,6 +144,10 @@ kbd { background: #21262d; border: 1px solid #30363d; border-radius: 3px; paddin
 .bc-seg:hover { color: #79c0ff; text-decoration: underline; }
 /* Larger click target for segments — click jumps to that node */
 .bc-seg { padding: 2px 4px; margin: -2px -4px; }
+
+/* ---- Skip Fields ---- */
+.exclude-input { width: 200px !important; }
+.exclude-input.active { border-color: #e3b341; box-shadow: 0 0 0 1px #e3b341; }
 
 /* ---- Change Navigation ---- */
 .change-nav { display: flex; align-items: center; gap: 6px; }

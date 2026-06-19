@@ -24,6 +24,7 @@ let filterTimer = null;           // debounce handle for filter input
 let DATA_LEFT_RAW = null;
 let DATA_RIGHT_RAW = null;
 let reorganizeEnabled = true;
+let EXCLUDED_FIELDS = new Set();
 
 // =====================================================================
 //  REORGANIZER — ported from Python comparer
@@ -197,6 +198,32 @@ function esc(str) {
   return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+function parseExcludeInput(value) {
+  var set = new Set();
+  if (!value || !value.trim()) return set;
+  var parts = value.split(',');
+  for (var i = 0; i < parts.length; i++) {
+    var name = parts[i].trim();
+    if (name) set.add(name);
+  }
+  return set;
+}
+
+function isExcludedField(key) {
+  if (!key || EXCLUDED_FIELDS.size === 0) return false;
+  if (EXCLUDED_FIELDS.has(key)) return true;
+  // Support glob-ish wildcard: *_ID matches SEGMENT_ID, IP_ID, etc.
+  var patterns = Array.from(EXCLUDED_FIELDS);
+  for (var pi = 0; pi < patterns.length; pi++) {
+    var pattern = patterns[pi];
+    if (pattern.indexOf('*') !== -1) {
+      var re = new RegExp('^' + pattern.replace(/\*/g, '.*').replace(/[.+^${}()|[\]\\]/g, '\\$&') + '$');
+      if (re.test(key)) return true;
+    }
+  }
+  return false;
+}
+
 function formatValue(v) {
   if (v === null || v === undefined) return '<span class="value-null">null</span>';
   if (typeof v === 'boolean') return '<span class="value-bool">' + v + '</span>';
@@ -228,32 +255,37 @@ function getValueStatus(leftVal, rightVal) {
 }
 
 function computeStats(left, right) {
-  let changed = 0, added = 0, removed = 0, same = 0;
+  var changed = 0, added = 0, removed = 0, same = 0;
 
-  function walk(l, r) {
+  function walk(l, r, parentKey) {
     if (l === undefined && r === undefined) return;
     if (l === undefined || r === undefined) {
+      if (isExcludedField(parentKey)) { same++; return; }
       if (l === undefined && r !== undefined) added++;
       else if (r === undefined && l !== undefined) removed++;
       return;
     }
     if (typeof l !== 'object' || l === null || typeof r !== 'object' || r === null) {
+      if (isExcludedField(parentKey)) { same++; return; }
       if (JSON.stringify(l) === JSON.stringify(r)) same++;
       else changed++;
       return;
     }
     if (Array.isArray(l) && Array.isArray(r)) {
-      const maxLen = Math.max(l.length, r.length);
-      for (let i = 0; i < maxLen; i++) walk(l[i], r[i]);
+      var maxLen = Math.max(l.length, r.length);
+      for (var i = 0; i < maxLen; i++) walk(l[i], r[i], parentKey);
     } else if (!Array.isArray(l) && !Array.isArray(r)) {
-      const allKeys = new Set([...Object.keys(l), ...Object.keys(r)]);
-      for (const key of allKeys) walk(l[key], r[key]);
+      var allKeys = Object.keys(l).concat(Object.keys(r));
+      var keySet = {};
+      for (var ki = 0; ki < allKeys.length; ki++) keySet[allKeys[ki]] = true;
+      for (var key in keySet) walk(l[key], r[key], key);
     } else {
+      if (isExcludedField(parentKey)) { same++; return; }
       changed++;
     }
   }
 
-  walk(left, right);
+  walk(left, right, '');
   return { changed: changed, added: added, removed: removed, same: same };
 }
 
@@ -283,11 +315,16 @@ function makeDescriptor(key, val, otherVal, side, depth, path) {
   const hasChildren = isBranch && (
     Array.isArray(val) ? val.length > 0 : Object.keys(val).length > 0
   );
+  var status = getValueStatus(val, otherVal);
+  // Force 'same' for excluded fields — they still show in tree but not as diffs
+  if (status !== 'same' && isExcludedField(key)) {
+    status = 'same';
+  }
   return {
     key: key, val: val, otherVal: otherVal, side: side,
     depth: depth, path: path, isBranch: isBranch,
     hasChildren: hasChildren,
-    status: getValueStatus(val, otherVal)
+    status: status
   };
 }
 
@@ -758,6 +795,57 @@ document.addEventListener('DOMContentLoaded', function() {
     refreshView();
   });
 
+  // Exclude fields — debounced re-render with localStorage persistence
+  var EXCLUDE_STORAGE_KEY = 'jci-exclude-fields';
+  var excludeTimer = null;
+
+  function saveExcludeToStorage(value) {
+    try { localStorage.setItem(EXCLUDE_STORAGE_KEY, value); } catch(e) {}
+  }
+
+  function loadExcludeFromStorage() {
+    try {
+      var saved = localStorage.getItem(EXCLUDE_STORAGE_KEY);
+      return saved || '';
+    } catch(e) { return ''; }
+  }
+
+  function applyExclude(value) {
+    EXCLUDED_FIELDS = parseExcludeInput(value);
+    var input = document.getElementById('excludeInput');
+    input.classList.toggle('active', value.trim().length > 0);
+    if (DATA_LEFT) {
+      CACHED_STATS = computeStats(DATA_LEFT, DATA_RIGHT);
+      currentFilter = null;
+      currentMap = null;
+      refreshView();
+    }
+  }
+
+  // Restore saved value on load
+  var savedExclude = loadExcludeFromStorage();
+  if (savedExclude) {
+    document.getElementById('excludeInput').value = savedExclude;
+    applyExclude(savedExclude);
+  }
+
+  document.getElementById('excludeInput').addEventListener('input', function() {
+    clearTimeout(excludeTimer);
+    var input = this;
+    excludeTimer = setTimeout(function() {
+      saveExcludeToStorage(input.value);
+      applyExclude(input.value);
+    }, 300);
+  });
+  document.getElementById('excludeInput').addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+      this.value = '';
+      clearTimeout(excludeTimer);
+      saveExcludeToStorage('');
+      applyExclude('');
+    }
+  });
+
   // Scroll sync between left and right panels
   // Uses requestAnimationFrame + value check to avoid sync layout during toggles
   var scrollSyncPending = null;
@@ -927,32 +1015,36 @@ function buildChangeIndex(leftData, rightData) {
   currentChangeIdx = -1;
   if (!leftData || !rightData) return;
 
-  function walk(l, r, path) {
+  function walk(l, r, path, parentKey) {
     if (l === undefined && r === undefined) return;
     if (l === undefined || r === undefined) {
-      CHANGE_INDEX.push({ path: path, status: l === undefined ? 'added' : 'removed' });
+      if (!isExcludedField(parentKey)) {
+        CHANGE_INDEX.push({ path: path, status: l === undefined ? 'added' : 'removed' });
+      }
       return;
     }
     if (typeof l !== 'object' || l === null || typeof r !== 'object' || r === null) {
-      if (JSON.stringify(l) !== JSON.stringify(r)) {
+      if (!isExcludedField(parentKey) && JSON.stringify(l) !== JSON.stringify(r)) {
         CHANGE_INDEX.push({ path: path, status: 'changed' });
       }
       return;
     }
     if (Array.isArray(l) && Array.isArray(r)) {
       var maxLen = Math.max(l.length, r.length);
-      for (var i = 0; i < maxLen; i++) walk(l[i], r[i], path + '/[' + i + ']');
+      for (var i = 0; i < maxLen; i++) walk(l[i], r[i], path + '/[' + i + ']', parentKey);
     } else if (!Array.isArray(l) && !Array.isArray(r)) {
       var allKeys = Object.keys(l).concat(Object.keys(r));
       var keySet = {};
       for (var ki = 0; ki < allKeys.length; ki++) keySet[allKeys[ki]] = true;
-      for (var key in keySet) walk(l[key], r[key], path + '/' + key);
+      for (var key in keySet) walk(l[key], r[key], path + '/' + key, key);
     } else {
-      CHANGE_INDEX.push({ path: path, status: 'changed' });
+      if (!isExcludedField(parentKey)) {
+        CHANGE_INDEX.push({ path: path, status: 'changed' });
+      }
     }
   }
 
-  walk(leftData, rightData, '');
+  walk(leftData, rightData, '', '');
   updateChangeCounter();
 }
 
@@ -965,10 +1057,11 @@ function expandPathToNode(side, path) {
   }
   if (!path) return;
 
+  // NODE_MAP keys use paths WITH leading slash: /unit, /unit/segmentList, etc.
   var parts = path.split('/').filter(Boolean);
   var accumulated = '';
   for (var i = 0; i < parts.length; i++) {
-    accumulated = accumulated ? accumulated + '/' + parts[i] : parts[i];
+    accumulated = accumulated + '/' + parts[i];
     var childrenDiv = NODE_MAP.get(side + ':' + accumulated);
     if (!childrenDiv) break;
     if (childrenDiv.classList.contains('hidden')) {
@@ -982,7 +1075,8 @@ function findNodeElement(side, path) {
   var parts = path.split('/').filter(Boolean);
   if (parts.length === 0) return null;
   var keyName = parts[parts.length - 1];
-  var parentPath = parts.slice(0, -1).join('/');
+  var parentSegments = parts.slice(0, -1);
+  var parentPath = parentSegments.length > 0 ? '/' + parentSegments.join('/') : '';
 
   var container;
   if (parentPath) {
@@ -1066,6 +1160,21 @@ function openHelp(topic) {
       + '<div class="help-example"><code>segmentType</code><span>Show segment type fields</span></div>'
       + '<div class="help-example"><code>800</code><span>Show nodes with value 800</span></div>'
       + '<p class="help-tip">The filter updates as you type. Press <kbd>Escape</kbd> to clear.</p>';
+  } else if (topic === 'skip') {
+    title.textContent = 'Skip Fields — Ignore Differences in Specific Fields';
+    body.innerHTML = '<p>Type field names separated by commas to <strong>exclude them from the diff</strong>. Excluded fields still appear in the tree but are marked as "same" and don\'t count toward change totals or navigation.</p>'
+      + '<h4>Examples</h4>'
+      + '<div class="help-example"><code>id</code><span>Ignore the <code>id</code> field everywhere</span></div>'
+      + '<div class="help-example"><code>id, $type</code><span>Ignore multiple fields</span></div>'
+      + '<div class="help-example"><code>*_ID</code><span>Wildcard — any field ending in <code>_ID</code></span></div>'
+      + '<div class="help-example"><code>createdDate, modifiedDate</code><span>Ignore timestamp fields</span></div>'
+      + '<div class="help-example"><code>id, $type, createdOn, modifiedOn, ownerId</code><span>Common volatile fields for AHU models</span></div>'
+      + '<h4>Tips</h4>'
+      + '<ul class="help-notes">'
+      + '<li>The input updates automatically 300ms after you stop typing</li>'
+      + '<li>Press <kbd>Escape</kbd> to clear and reset</li>'
+      + '<li>Your skip list is <strong>saved automatically</strong> in localStorage — it persists across reloads</li>'
+      + '</ul>';
   } else {
     title.textContent = 'JMESPath — Query, Filter & Map';
     body.innerHTML = '<p>JMESPath is a query language for JSON, similar to <strong>JavaScript\'s .map() + .filter()</strong>. Write an expression and it runs against both datasets, showing a preview and a diff table.</p>'
