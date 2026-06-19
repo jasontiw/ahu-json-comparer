@@ -631,6 +631,9 @@ function refreshView() {
     renderFullTree(document.getElementById('viewRight'), DATA_LEFT, DATA_RIGHT, 'right', filterExpr);
   }
 
+  // Rebuild change index for navigation
+  buildChangeIndex(DATA_LEFT, DATA_RIGHT);
+
   // Reset breadcrumbs after re-render
   var bcL = document.getElementById('breadcrumbLeft');
   var bcR = document.getElementById('breadcrumbRight');
@@ -893,6 +896,10 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('expandAllBtn').addEventListener('click', expandAll);
   document.getElementById('collapseAllBtn').addEventListener('click', collapseAll);
 
+  // Change navigation buttons
+  document.getElementById('nextChangeBtn').addEventListener('click', function() { navigateToChange(1); });
+  document.getElementById('prevChangeBtn').addEventListener('click', function() { navigateToChange(-1); });
+
   // Try URL params first
   const params = new URLSearchParams(window.location.search);
   if (params.has('left') && params.has('right')) {
@@ -907,6 +914,141 @@ document.addEventListener('DOMContentLoaded', function() {
       });
   }
 });
+
+// =====================================================================
+//  CHANGE NAVIGATION
+// =====================================================================
+
+let CHANGE_INDEX = [];
+let currentChangeIdx = -1;
+
+function buildChangeIndex(leftData, rightData) {
+  CHANGE_INDEX = [];
+  currentChangeIdx = -1;
+  if (!leftData || !rightData) return;
+
+  function walk(l, r, path) {
+    if (l === undefined && r === undefined) return;
+    if (l === undefined || r === undefined) {
+      CHANGE_INDEX.push({ path: path, status: l === undefined ? 'added' : 'removed' });
+      return;
+    }
+    if (typeof l !== 'object' || l === null || typeof r !== 'object' || r === null) {
+      if (JSON.stringify(l) !== JSON.stringify(r)) {
+        CHANGE_INDEX.push({ path: path, status: 'changed' });
+      }
+      return;
+    }
+    if (Array.isArray(l) && Array.isArray(r)) {
+      var maxLen = Math.max(l.length, r.length);
+      for (var i = 0; i < maxLen; i++) walk(l[i], r[i], path + '/[' + i + ']');
+    } else if (!Array.isArray(l) && !Array.isArray(r)) {
+      var allKeys = Object.keys(l).concat(Object.keys(r));
+      var keySet = {};
+      for (var ki = 0; ki < allKeys.length; ki++) keySet[allKeys[ki]] = true;
+      for (var key in keySet) walk(l[key], r[key], path + '/' + key);
+    } else {
+      CHANGE_INDEX.push({ path: path, status: 'changed' });
+    }
+  }
+
+  walk(leftData, rightData, '');
+  updateChangeCounter();
+}
+
+function expandPathToNode(side, path) {
+  // First, ensure the root is expanded — otherwise no child nodes exist in DOM
+  var rootChildren = NODE_MAP.get(side + ':');
+  if (rootChildren && rootChildren.classList.contains('hidden')) {
+    var rootToggle = rootChildren.parentElement && rootChildren.parentElement.querySelector('.toggle-icon');
+    if (rootToggle) rootToggle.click();
+  }
+  if (!path) return;
+
+  var parts = path.split('/').filter(Boolean);
+  var accumulated = '';
+  for (var i = 0; i < parts.length; i++) {
+    accumulated = accumulated ? accumulated + '/' + parts[i] : parts[i];
+    var childrenDiv = NODE_MAP.get(side + ':' + accumulated);
+    if (!childrenDiv) break;
+    if (childrenDiv.classList.contains('hidden')) {
+      var toggle = childrenDiv.parentElement && childrenDiv.parentElement.querySelector('.toggle-icon');
+      if (toggle) toggle.click();
+    }
+  }
+}
+
+function findNodeElement(side, path) {
+  var parts = path.split('/').filter(Boolean);
+  if (parts.length === 0) return null;
+  var keyName = parts[parts.length - 1];
+  var parentPath = parts.slice(0, -1).join('/');
+
+  var container;
+  if (parentPath) {
+    var parentChildren = NODE_MAP.get(side + ':' + parentPath);
+    if (!parentChildren) return null;
+    container = parentChildren;
+  } else {
+    container = side === 'left' ? document.getElementById('viewLeft') : document.getElementById('viewRight');
+  }
+  if (!container) return null;
+
+  var children = container.children;
+  for (var ci = 0; ci < children.length; ci++) {
+    var tn = children[ci];
+    if (!tn.classList || !tn.classList.contains('tree-node')) continue;
+    var ks = tn.querySelector('.node-key');
+    if (ks && ks.textContent === keyName) {
+      return tn.querySelector('.node-row') || tn;
+    }
+  }
+  return null;
+}
+
+function scrollToChange(side, path) {
+  var el = findNodeElement(side, path);
+  if (!el) return false;
+
+  // Remove previous highlight from both sides
+  document.querySelectorAll('.change-highlight').forEach(function(h) { h.classList.remove('change-highlight'); });
+
+  el.classList.add('change-highlight');
+  setTimeout(function() { el.classList.remove('change-highlight'); }, 2000);
+
+  var panel = el.closest('.panel');
+  if (panel) {
+    var panelRect = panel.getBoundingClientRect();
+    var elRect = el.getBoundingClientRect();
+    var offset = elRect.top - panelRect.top + panel.scrollTop - panelRect.height / 3;
+    panel.scrollTop = Math.max(0, offset);
+  }
+  return true;
+}
+
+function navigateToChange(delta) {
+  if (!CHANGE_INDEX || CHANGE_INDEX.length === 0) return;
+  currentChangeIdx = (currentChangeIdx + delta + CHANGE_INDEX.length) % CHANGE_INDEX.length;
+  var change = CHANGE_INDEX[currentChangeIdx];
+
+  // Expand ancestors on both sides so the element exists in DOM
+  expandPathToNode('left', change.path);
+  expandPathToNode('right', change.path);
+
+  scrollToChange('left', change.path);
+  scrollToChange('right', change.path);
+  updateChangeCounter();
+}
+
+function updateChangeCounter() {
+  var el = document.getElementById('changeCounter');
+  if (!el) return;
+  if (!CHANGE_INDEX || CHANGE_INDEX.length === 0) {
+    el.textContent = '0 / 0';
+    return;
+  }
+  el.textContent = (currentChangeIdx >= 0 ? (currentChangeIdx + 1) : '-') + ' / ' + CHANGE_INDEX.length;
+}
 
 // =====================================================================
 //  JCI JSON Comparer - Help Modal
@@ -959,4 +1101,20 @@ function closeHelp() {
 }
 document.addEventListener('keydown', function(e) {
   if (e.key === 'Escape') closeHelp();
+
+  // Change navigation: N/P keys (not when typing in inputs)
+  if (e.key === 'n' || e.key === 'N') {
+    var tag = e.target && e.target.tagName;
+    if (tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {
+      e.preventDefault();
+      navigateToChange(1);
+    }
+  }
+  if (e.key === 'p' || e.key === 'P') {
+    var tag = e.target && e.target.tagName;
+    if (tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {
+      e.preventDefault();
+      navigateToChange(-1);
+    }
+  }
 });
