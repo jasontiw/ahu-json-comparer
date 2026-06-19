@@ -74,7 +74,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0d1117; colo
 .value-bool { color: #ff7b72; }
 .value-string { color: #a5d6ff; }
 .value-number { color: #79c0ff; }
-.children { margin-left: 18px; border-left: 1px solid #21262d; padding-left: 6px; }
+.children { margin-left: 18px; border-left: 1px solid #21262d; padding-left: 6px; contain: layout style paint; content-visibility: auto; contain-intrinsic-size: auto 24px; }
 .hidden { display: none; }
 
 /* ---- Table View ---- */
@@ -210,6 +210,13 @@ let FILE_LEFT = '';
 let FILE_RIGHT = '';
 
 // =====================================================================
+//  PERFORMANCE OPTIMIZATION GLOBALS
+// =====================================================================
+let NODE_MAP = new Map();          // key: side:path → childrenDiv for sync
+let CACHED_STATS = null;          // precomputed stats from onDataLoaded
+let filterTimer = null;           // debounce handle for filter input
+
+// =====================================================================
 //  FILE LOADING
 // =====================================================================
 
@@ -251,6 +258,7 @@ function onDataLoaded() {
   document.getElementById('splitView').style.display = 'flex';
   document.getElementById('panelLeftTitle').textContent = FILE_LEFT;
   document.getElementById('panelRightTitle').textContent = FILE_RIGHT;
+  CACHED_STATS = computeStats(DATA_LEFT, DATA_RIGHT);
   refreshView();
 }
 
@@ -326,26 +334,116 @@ function computeStats(left, right) {
 //  FULL TREE VIEW
 // =====================================================================
 
-function subtreeMatches(val, filterLower) {
-  if (val === null || val === undefined) return false;
-  const str = JSON.stringify(val).toLowerCase();
-  if (str.includes(filterLower)) return true;
-  if (typeof val === 'object') {
-    for (const k in val) {
-      if (k.toLowerCase().includes(filterLower)) return true;
-      if (subtreeMatches(val[k], filterLower)) return true;
+function resolvePath(obj, path) {
+  if (!path || path === '') return obj;
+  const parts = path.split('/').filter(Boolean);
+  let current = obj;
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    if (current === null || current === undefined) return undefined;
+    if (part.startsWith('[') && part.endsWith(']')) {
+      const idx = parseInt(part.slice(1, -1), 10);
+      current = Array.isArray(current) ? current[idx] : undefined;
+    } else {
+      current = current[part];
     }
+  }
+  return current;
+}
+
+function makeDescriptor(key, val, otherVal, side, depth, path) {
+  const isBranch = val !== null && val !== undefined && typeof val === 'object';
+  const hasChildren = isBranch && (
+    Array.isArray(val) ? val.length > 0 : Object.keys(val).length > 0
+  );
+  return {
+    key: key, val: val, otherVal: otherVal, side: side,
+    depth: depth, path: path, isBranch: isBranch,
+    hasChildren: hasChildren,
+    status: getValueStatus(val, otherVal)
+  };
+}
+
+function computeFilterKey(desc, filterLower) {
+  if (!filterLower) return true;
+  if (desc.key && desc.key.toLowerCase().includes(filterLower)) return true;
+  // Compute filter match lazily from actual values
+  const checkVal = (desc.val !== null && desc.val !== undefined) ? desc.val : desc.otherVal;
+  if (checkVal !== null && checkVal !== undefined) {
+    const str = JSON.stringify(checkVal).toLowerCase();
+    if (str.includes(filterLower)) return true;
   }
   return false;
 }
 
-function syncOtherPanel(side, path, expanded) {
-  var otherId = side === 'left' ? 'viewRight' : 'viewLeft';
-  var otherChildren = document.querySelector('#' + otherId + ' [data-path="' + path.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"]');
-  if (!otherChildren) return;
+function lazyExpandChildren(childrenDiv, desc) {
+  const side = desc.side;
+  const data = resolvePath(side === 'left' ? DATA_LEFT : DATA_RIGHT, desc.path);
+  const otherData = resolvePath(side === 'left' ? DATA_RIGHT : DATA_LEFT, desc.path);
+
+  if (data === null || data === undefined || typeof data !== 'object') return;
+
+  const filterInput = document.getElementById('filterInput');
+  const filterText = filterInput ? filterInput.value.trim().toLowerCase() : '';
+  const fragment = document.createDocumentFragment();
+
+  var childDepth = desc.depth + 1;
+
+  if (Array.isArray(data)) {
+    const otherArr = Array.isArray(otherData) ? otherData : [];
+    for (let i = 0; i < data.length; i++) {
+      const childPath = desc.path + '/[' + i + ']';
+      const childDesc = makeDescriptor('[' + i + ']', data[i], otherArr[i], side, childDepth, childPath);
+      if (filterText && !computeFilterKey(childDesc, filterText)) continue;
+      const el = renderNodeFromDescriptor(childDesc);
+      if (el) fragment.appendChild(el);
+    }
+  } else {
+    const otherObj = (otherData && typeof otherData === 'object' && !Array.isArray(otherData)) ? otherData : {};
+    for (const key in data) {
+      const childPath = desc.path + '/' + key;
+      const childDesc = makeDescriptor(key, data[key], otherObj[key], side, childDepth, childPath);
+      if (filterText && !computeFilterKey(childDesc, filterText)) continue;
+      const el = renderNodeFromDescriptor(childDesc);
+      if (el) fragment.appendChild(el);
+    }
+    // Add keys only in other side (shown as leaf nodes - not expandable)
+    if (otherData && typeof otherData === 'object' && !Array.isArray(otherData)) {
+      for (const key in otherData) {
+        if (data[key] !== undefined) continue;
+        const childPath = desc.path + '/' + key;
+        const childDesc = makeDescriptor(key, undefined, otherData[key], side, childDepth, childPath);
+        if (filterText && !computeFilterKey(childDesc, filterText)) continue;
+        const el = renderNodeFromDescriptor(childDesc);
+        if (el) fragment.appendChild(el);
+      }
+    }
+  }
+
+  childrenDiv.appendChild(fragment);
+}
+
+function renderNodeFromDescriptor(desc) {
+  return renderValueNode(desc);
+}
+
+function syncOtherPanel(side, path, expanded, depth) {
+  var otherSide = side === 'left' ? 'right' : 'left';
+  var otherChildren = NODE_MAP.get(otherSide + ':' + path);
+  if (!otherChildren) {
+    // Fallback: try querySelector if NODE_MAP lookup fails
+    var otherId = side === 'left' ? 'viewRight' : 'viewLeft';
+    otherChildren = document.querySelector('#' + otherId + ' [data-path="' + path.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"]');
+    if (!otherChildren) return;
+  }
+  if (!otherChildren.parentElement) return;
   var otherToggle = otherChildren.parentElement.querySelector('.toggle-icon');
   if (!otherToggle) return;
   if (expanded) {
+    // Lazy-load children on the other side if not yet expanded
+    if (otherChildren.children.length === 0) {
+      lazyExpandChildren(otherChildren, { path: path, depth: depth || 0, side: otherSide });
+    }
     otherChildren.classList.remove('hidden');
     otherToggle.textContent = '\u25BC';
   } else {
@@ -354,123 +452,94 @@ function syncOtherPanel(side, path, expanded) {
   }
 }
 
-function renderValueNode(key, val, otherVal, side, depth, filterText, path) {
+function renderValueNode(desc) {
+  var val = desc.val;
+  var otherVal = desc.otherVal;
 
-  if (filterText && filterText.trim()) {
-    const ft = filterText.trim().toLowerCase();
-    const keyMatch = key && key.toLowerCase().includes(ft);
-    const checkV = (val != null) ? val : otherVal;
-    const valMatch = checkV != null && JSON.stringify(checkV).toLowerCase().includes(ft);
-    if (!keyMatch && !valMatch) {
-      if (typeof val === 'object' && val !== null) {
-        if (!subtreeMatches(val, ft)) return null;
-      } else if (typeof otherVal === 'object' && otherVal !== null) {
-        if (!subtreeMatches(otherVal, ft)) return null;
-      } else {
-        return null;
-      }
-    }
+  // Node exists only on the other side (e.g. 'added' on left means val is null)
+  if ((val === undefined || val === null) && otherVal !== undefined && otherVal !== null) {
+    var div = document.createElement('div');
+    div.className = 'tree-node';
+    var row = document.createElement('div');
+    row.className = 'node-row';
+    row.style.paddingLeft = (desc.depth * 18 + 6) + 'px';
+    row.innerHTML = '<span class="node-key">' + esc(desc.key) + '</span><span class="node-colon">:</span> '
+      + (desc.side === 'left'
+        ? '<span class="value-added">(added)</span>'
+        : '<span class="value-removed">(removed)</span>');
+    div.appendChild(row);
+    return div;
   }
 
-  if (val === undefined || val === null) {
-    if (otherVal !== undefined && otherVal !== null) {
-      const div = document.createElement('div');
-      div.className = 'tree-node';
-      const row = document.createElement('div');
-      row.className = 'node-row';
-      row.style.paddingLeft = (depth * 18 + 6) + 'px';
-      row.innerHTML = '<span class="node-key">' + esc(key) + '</span><span class="node-colon">:</span> '
-        + (side === 'left'
-          ? '<span class="value-added">(added)</span>'
-          : '<span class="value-removed">(removed)</span>');
-      div.appendChild(row);
-      return div;
-    }
-    return null;
-  }
+  if (val === undefined || val === null) return null;
 
-  const isBranch = typeof val === 'object' && val !== null;
-  const status = getValueStatus(val, otherVal);
-  const hasChildren = isBranch && (Array.isArray(val) ? val.length > 0 : Object.keys(val).length > 0);
+  var isBranch = desc.isBranch;
+  var status = desc.status;
+  var hasChildren = desc.hasChildren;
 
-  const div = document.createElement('div');
+  var div = document.createElement('div');
   div.className = 'tree-node';
 
   if (isBranch && hasChildren) {
-    const row = document.createElement('div');
+    // Branch node — create row with toggle + empty childrenDiv (lazy)
+    var row = document.createElement('div');
     row.className = 'node-row branch';
-    row.style.paddingLeft = (depth * 18 + 6) + 'px';
+    row.style.paddingLeft = (desc.depth * 18 + 6) + 'px';
 
     if (status !== 'same') {
       row.classList.add('has-diff');
     }
 
-    const toggle = document.createElement('span');
+    var toggle = document.createElement('span');
     toggle.className = 'toggle-icon';
     toggle.textContent = '\u25B6';
 
-    const keySpan = document.createElement('span');
+    var keySpan = document.createElement('span');
     keySpan.className = 'node-key';
-    keySpan.textContent = key || '';
+    keySpan.textContent = desc.key || '';
 
-    const info = document.createElement('span');
+    var info = document.createElement('span');
     info.className = 'node-info';
-    if (Array.isArray(val)) {
-      info.textContent = '[' + val.length + ']';
-    } else {
-      info.textContent = '{' + Object.keys(val).length + '}';
+    var effectiveVal = (val !== null && val !== undefined) ? val : otherVal;
+    if (Array.isArray(effectiveVal)) {
+      info.textContent = '[' + effectiveVal.length + ']';
+    } else if (effectiveVal && typeof effectiveVal === 'object') {
+      info.textContent = '{' + Object.keys(effectiveVal).length + '}';
     }
 
     row.appendChild(toggle);
     row.appendChild(keySpan);
     row.appendChild(info);
-
     div.appendChild(row);
 
-    const childrenDiv = document.createElement('div');
+    // Empty childrenDiv — created now for CSS, filled on first expand
+    var childrenDiv = document.createElement('div');
     childrenDiv.className = 'children hidden';
-    childrenDiv.setAttribute('data-path', path);
-
-    if (Array.isArray(val)) {
-      const otherArr = Array.isArray(otherVal) ? otherVal : [];
-      for (let i = 0; i < val.length; i++) {
-        const childPath = path + '/[' + i + ']';
-        const child = renderValueNode('[' + i + ']', val[i], otherArr[i], side, depth + 1, filterText, childPath);
-        if (child) childrenDiv.appendChild(child);
-      }
-    } else {
-      const allKeys = Object.keys(val);
-      for (let k = 0; k < allKeys.length; k++) {
-        const keyName = allKeys[k];
-        const childPath = path + '/' + keyName;
-        const child = renderValueNode(keyName, val[keyName],
-          (otherVal && typeof otherVal === 'object' && !Array.isArray(otherVal)) ? otherVal[keyName] : undefined,
-          side, depth + 1, filterText, childPath);
-        if (child) childrenDiv.appendChild(child);
-      }
-
-      if (otherVal && typeof otherVal === 'object' && !Array.isArray(otherVal)) {
-        for (const keyName in otherVal) {
-          if (val[keyName] !== undefined) continue;
-          const childPath = path + '/' + keyName;
-          const child = renderValueNode(keyName, undefined, otherVal[keyName], side, depth + 1, filterText, childPath);
-          if (child) childrenDiv.appendChild(child);
-        }
-      }
-    }
-
+    childrenDiv.setAttribute('data-path', desc.path);
     div.appendChild(childrenDiv);
 
+    // Register in NODE_MAP for syncOtherPanel
+    NODE_MAP.set(desc.side + ':' + desc.path, childrenDiv);
+
+    // Lazy expand/collapse
+    var expanded = false;
+
     function toggleBranch() {
-      const isHidden = childrenDiv.classList.contains('hidden');
-      if (isHidden) {
-        childrenDiv.classList.remove('hidden');
-        toggle.textContent = '\u25BC';
-      } else {
+      if (expanded) {
+        // Collapse: just hide children — keep DOM intact for instant re-open
         childrenDiv.classList.add('hidden');
         toggle.textContent = '\u25B6';
+        expanded = false;
+      } else {
+        // Expand: load children lazily on first expand, then just show
+        if (childrenDiv.children.length === 0) {
+          lazyExpandChildren(childrenDiv, desc);
+        }
+        childrenDiv.classList.remove('hidden');
+        toggle.textContent = '\u25BC';
+        expanded = true;
       }
-      syncOtherPanel(side, path, !childrenDiv.classList.contains('hidden'));
+      syncOtherPanel(desc.side, desc.path, expanded, desc.depth);
     }
 
     row.onclick = function(e) {
@@ -484,18 +553,23 @@ function renderValueNode(key, val, otherVal, side, depth, filterText, path) {
     };
 
   } else {
-    const row = document.createElement('div');
+    // Leaf node
+    var row = document.createElement('div');
     row.className = 'node-row';
-    row.style.paddingLeft = (depth * 18 + 6) + 'px';
+    row.style.paddingLeft = (desc.depth * 18 + 6) + 'px';
 
-    let keyHtml = '';
-    if (key != null && key !== '') {
-      keyHtml = '<span class="node-key">' + esc(key) + '</span><span class="node-colon">:</span> ';
+    if (status !== 'same') {
+      row.classList.add('has-diff');
     }
 
-    let valHtml = '';
+    var keyHtml = '';
+    if (desc.key != null && desc.key !== '') {
+      keyHtml = '<span class="node-key">' + esc(desc.key) + '</span><span class="node-colon">:</span> ';
+    }
+
+    var valHtml = '';
     if (status === 'changed') {
-      if (side === 'left') {
+      if (desc.side === 'left') {
         valHtml = '<span class="value-changed-left">' + esc(JSON.stringify(val)) + '</span>';
       } else {
         valHtml = '<span class="value-changed-right">' + esc(JSON.stringify(val)) + '</span>';
@@ -520,8 +594,12 @@ function renderFullTree(container, leftData, rightData, side, filterText, rootLa
   const data = side === 'left' ? leftData : rightData;
   const otherData = side === 'left' ? rightData : leftData;
   const label = rootLabel || '(root)';
-  const rootNode = renderValueNode(label, data, otherData, side, 0, filterText, '');
-  if (rootNode) container.appendChild(rootNode);
+
+  // Build root descriptor lazily — only this node, no pre-walk
+  const rootDesc = makeDescriptor(label, data, otherData, side, 0, '');
+
+  const rootEl = renderNodeFromDescriptor(rootDesc);
+  if (rootEl) container.appendChild(rootEl);
 }
 
 // =====================================================================
@@ -581,16 +659,22 @@ function describeResult(v) {
 //  VIEW MANAGEMENT
 // =====================================================================
 
-var currentFilter = '';
-var currentMap = '';
+var currentFilter = null;
+var currentMap = null;
 
 function refreshView() {
   if (!DATA_LEFT || !DATA_RIGHT) return;
 
   var filterExpr = document.getElementById('filterInput').value;
   var mapExpr = document.getElementById('mapInput').value;
+
+  // Skip re-render if nothing changed (avoids duplicate work from debounce)
+  if (filterExpr === currentFilter && mapExpr === currentMap) return;
   currentFilter = filterExpr;
   currentMap = mapExpr;
+
+  // Reset node map for new render
+  NODE_MAP = new Map();
 
   document.getElementById('splitView').style.display = 'flex';
 
@@ -598,8 +682,8 @@ function refreshView() {
     // JMESPath mode: show query result in the tree
     renderJmesPathResult(mapExpr, filterExpr);
   } else {
-    // Full JSON tree mode
-    var stats = computeStats(DATA_LEFT, DATA_RIGHT);
+    // Full JSON tree mode — use cached stats (computed once in onDataLoaded)
+    var stats = CACHED_STATS || computeStats(DATA_LEFT, DATA_RIGHT);
     document.getElementById('statsBar').innerHTML =
       '<span class="stat stat-total">Total differences: ' + (stats.changed + stats.added + stats.removed) + '</span>' +
       '<span class="stat stat-changed">Changed: ' + stats.changed + '</span>' +
@@ -629,9 +713,10 @@ document.addEventListener('DOMContentLoaded', function() {
       checkBothLoaded();
     });
   });
-  // Toolbar — filter
+  // Toolbar — filter (debounced to avoid freeze on rapid typing)
   document.getElementById('filterInput').addEventListener('input', function() {
-    refreshView();
+    clearTimeout(filterTimer);
+    filterTimer = setTimeout(refreshView, 200);
   });
   document.getElementById('filterInput').addEventListener('keydown', function(e) {
     if (e.key === 'Escape') { this.value = ''; refreshView(); }
@@ -669,20 +754,47 @@ document.addEventListener('DOMContentLoaded', function() {
   panelLeft.addEventListener('scroll', syncScroll(panelLeft, panelRight), { passive: true });
   panelRight.addEventListener('scroll', syncScroll(panelRight, panelLeft), { passive: true });
 
-  // Expand / Collapse all
+  // Helper to compute depth from path string
+  function pathDepth(path) {
+    if (!path || path === '') return 0;
+    return path.split('/').filter(Boolean).length;
+  }
+
+  // Expand All — recursively walk all branches using actual data
   function expandAll() {
-    document.querySelectorAll('#viewLeft .children, #viewRight .children').forEach(function(el) {
-      el.classList.remove('hidden');
-    });
-    document.querySelectorAll('#viewLeft .toggle-icon, #viewRight .toggle-icon').forEach(function(el) {
-      el.textContent = '\u25BC';
+    function expandRecursive(container, path, side) {
+      if (container.children.length === 0) {
+        lazyExpandChildren(container, { path: path, depth: pathDepth(path), side: side });
+      }
+      container.classList.remove('hidden');
+      var parentEl = container.parentElement;
+      if (parentEl) {
+        var toggle = parentEl.querySelector('.toggle-icon');
+        if (toggle) toggle.textContent = '\u25BC';
+      }
+      // Recurse into child branches
+      var childContainers = container.querySelectorAll(':scope > .tree-node > .children');
+      for (var ci = 0; ci < childContainers.length; ci++) {
+        var childPath = childContainers[ci].getAttribute('data-path');
+        if (childPath) {
+          expandRecursive(childContainers[ci], childPath, side);
+        }
+      }
+    }
+    ['left:', 'right:'].forEach(function(rootKey) {
+      var rootDiv = NODE_MAP.get(rootKey);
+      if (!rootDiv || !rootDiv.parentElement) return;
+      expandRecursive(rootDiv, '', rootKey === 'left:' ? 'left' : 'right');
     });
   }
+
+  // Collapse All — hide child containers without destroying DOM
   function collapseAll() {
-    document.querySelectorAll('#viewLeft .children, #viewRight .children').forEach(function(el) {
-      el.classList.add('hidden');
+    NODE_MAP.forEach(function(cv) {
+      cv.classList.add('hidden');
     });
-    document.querySelectorAll('#viewLeft .toggle-icon, #viewRight .toggle-icon').forEach(function(el) {
+    // Update visible toggle icons
+    document.querySelectorAll('.toggle-icon').forEach(function(el) {
       el.textContent = '\u25B6';
     });
   }
