@@ -6,4 +6,3 @@ dist/
 *.egg-info/
 diff.json
 diff.html
-comparer.html

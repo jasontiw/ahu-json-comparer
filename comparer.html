@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JCI JSON Comparer</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0d1117; color: #e6edf3; padding: 16px; min-height: 100vh; }
+
+/* ---- Header ---- */
+.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px; }
+.header h1 { font-size: 18px; font-weight: 600; color: #f0f6fc; }
+
+/* ---- Stats ---- */
+.stats { display: flex; gap: 10px; flex-wrap: wrap; }
+.stat { padding: 4px 12px; border-radius: 6px; font-size: 12px; font-weight: 500; }
+.stat-total { background: #21262d; color: #8b949e; border: 1px solid #30363d; }
+.stat-changed { background: #3d2e00; color: #e3b341; border: 1px solid #5a4300; }
+.stat-added { background: #0b3b24; color: #3fb950; border: 1px solid #196c2e; }
+.stat-removed { background: #3d0e14; color: #f85149; border: 1px solid #6b1a1a; }
+.stat-same { background: #161b22; color: #8b949e; border: 1px solid #21262d; }
+.jmespath-active { background: #0b3b24; color: #3fb950; font-family: 'Cascadia Code','JetBrains Mono','Consolas',monospace; font-size: 12px; white-space: normal; word-break: break-all; max-width: 500px; }
+
+/* ---- File Bar ---- */
+.file-bar { display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; background: #161b22; padding: 12px 16px; border-radius: 8px; border: 1px solid #30363d; }
+.file-group { display: flex; align-items: center; gap: 8px; }
+.file-group label { font-size: 12px; color: #8b949e; font-weight: 600; white-space: nowrap; }
+.file-group input[type="file"] { font-size: 12px; color: #c9d1d9; }
+.file-group input[type="file"]::file-selector-button { padding: 4px 12px; border-radius: 6px; border: 1px solid #30363d; background: #21262d; color: #c9d1d9; font-size: 12px; cursor: pointer; }
+.file-group input[type="file"]::file-selector-button:hover { background: #30363d; }
+.file-name { color: #58a6ff; font-size: 13px; font-family: 'Cascadia Code', 'JetBrains Mono', 'Consolas', monospace; }
+.file-name.not-loaded { color: #484f58; font-style: italic; }
+
+
+/* ---- Toolbar ---- */
+.toolbar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; background: #161b22; padding: 10px 14px; border-radius: 8px; border: 1px solid #30363d; }
+.toolbar-group { display: flex; align-items: center; gap: 6px; }
+.toolbar label { font-size: 12px; color: #8b949e; font-weight: 500; white-space: nowrap; }
+.toolbar input[type="text"] { padding: 5px 10px; border-radius: 6px; border: 1px solid #30363d; background: #0d1117; color: #e6edf3; font-size: 13px; font-family: 'Cascadia Code', 'JetBrains Mono', 'Consolas', monospace; outline: none; width: 280px; }
+.toolbar input[type="text"]:focus { border-color: #58a6ff; }
+.toolbar input[type="text"]::placeholder { color: #484f58; font-family: 'Segoe UI', system-ui, sans-serif; }
+.toolbar button, .tb-btn { padding: 5px 14px; border-radius: 6px; border: 1px solid #30363d; background: #21262d; color: #c9d1d9; font-size: 12px; font-weight: 500; cursor: pointer; font-family: inherit; }
+.toolbar button:hover, .tb-btn:hover { background: #30363d; }
+.toolbar button:active, .tb-btn:active { background: #484f58; }
+.toolbar-sep { width: 1px; height: 28px; background: #30363d; margin: 0 4px; }
+
+/* ---- Split View ---- */
+.split-view { display: flex; gap: 2px; }
+.panel { flex: 1; min-width: 0; overflow-y: auto; max-height: calc(100vh - 200px); padding: 12px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; }
+.panel-left { border-right: none; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.panel-right { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.panel h2 { font-size: 13px; font-weight: 600; color: #8b949e; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid #21262d; text-transform: uppercase; letter-spacing: 0.5px; }
+
+/* ---- Tree View ---- */
+.tree-node { }
+.node-row { display: flex; align-items: center; gap: 4px; padding: 2px 6px; border-radius: 4px; cursor: default; white-space: nowrap; }
+.node-row.branch { cursor: pointer; }
+.node-row.branch:hover { background: #161b22; }
+.node-row.has-diff { border-left: 3px solid #e3b341; }
+.node-row.has-added { border-left: 3px solid #3fb950; }
+.node-row.has-removed { border-left: 3px solid #f85149; }
+.toggle-icon { width: 14px; height: 14px; display: inline-flex; align-items: center; justify-content: center; font-size: 8px; color: #484f58; flex-shrink: 0; user-select: none; }
+.node-key { color: #79c0ff; }
+.node-colon { color: #484f58; margin-right: 4px; }
+.node-eq { color: #484f58; }
+.node-info { font-size: 10px; color: #484f58; margin-left: 4px; }
+.value-same { color: #a5d6ff; }
+.value-changed-left { color: #f85149; text-decoration: line-through; background: #3d0e14; padding: 0 4px; border-radius: 3px; }
+.value-changed-right { color: #3fb950; background: #0b3b24; padding: 0 4px; border-radius: 3px; }
+.value-added { color: #3fb950; background: #0b3b24; padding: 0 4px; border-radius: 3px; }
+.value-removed { color: #f85149; text-decoration: line-through; background: #3d0e14; padding: 0 4px; border-radius: 3px; }
+.value-null { color: #8b949e; font-style: italic; }
+.value-bool { color: #ff7b72; }
+.value-string { color: #a5d6ff; }
+.value-number { color: #79c0ff; }
+.children { margin-left: 18px; border-left: 1px solid #21262d; padding-left: 6px; }
+.hidden { display: none; }
+
+/* ---- Table View ---- */
+.table-view { width: 100%; overflow-x: auto; margin-top: 12px; }
+.table-view table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.table-view th { background: #161b22; color: #8b949e; font-weight: 500; text-align: left; padding: 8px 12px; border-bottom: 2px solid #30363d; text-transform: uppercase; letter-spacing: 0.3px; font-size: 11px; }
+.table-view td { padding: 6px 12px; border-bottom: 1px solid #21262d; vertical-align: middle; }
+.table-view tr:hover td { background: #161b22; }
+.col-path { color: #f0f6fc; font-weight: 500; white-space: nowrap; font-family: 'Cascadia Code', 'JetBrains Mono', 'Consolas', monospace; font-size: 12px; }
+.col-value { font-family: 'Cascadia Code', 'JetBrains Mono', 'Consolas', monospace; font-size: 12px; max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.col-status { text-align: center; }
+.status-badge { display: inline-block; padding: 1px 8px; border-radius: 8px; font-size: 10px; font-weight: 500; letter-spacing: 0.3px; }
+.status-badge.same { background: #161b22; color: #8b949e; border: 1px solid #21262d; }
+.status-badge.changed { background: #3d2e00; color: #e3b341; border: 1px solid #5a4300; }
+.status-badge.added { background: #0b3b24; color: #3fb950; border: 1px solid #196c2e; }
+.status-badge.removed { background: #3d0e14; color: #f85149; border: 1px solid #6b1a1a; }
+
+/* ---- Map Header ---- */
+.map-header { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 8px 14px; margin-bottom: 12px; }
+.map-header-label { color: #79c0ff; font-family: 'Cascadia Code', 'JetBrains Mono', 'Consolas', monospace; font-size: 13px; }
+.map-summary { padding: 6px 14px; color: #8b949e; font-size: 12px; border-bottom: 1px solid #21262d; margin-bottom: 8px; }
+.result-preview { background: #0d1117; border: 1px solid #21262d; border-radius: 6px; margin: 8px 0; padding: 8px 14px; font-family: 'Cascadia Code','JetBrains Mono','Consolas',monospace; font-size: 12px; line-height: 1.7; }
+.result-preview-row { word-break: break-all; }
+.preview-side-label { color: #58a6ff; font-weight: 500; margin-right: 6px; }
+.preview-count { color: #484f58; font-size: 11px; }
+.preview-more { color: #484f58; }
+.preview-truncated { color: #484f58; }
+
+/* Help button & modal */
+.help-btn { cursor: pointer; color: #58a6ff; font-size: 14px; margin-left: 3px; vertical-align: middle; }
+.help-btn:hover { color: #79c0ff; }
+.help-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: flex-start; padding: 40px 16px; overflow-y: auto; }
+.help-overlay.open { display: flex; }
+.help-modal { background: #161b22; border: 1px solid #30363d; border-radius: 12px; max-width: 720px; width: 100%; margin: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
+.help-modal-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; border-bottom: 1px solid #30363d; font-size: 16px; font-weight: 600; }
+.help-modal-close { font-size: 24px; cursor: pointer; color: #8b949e; line-height: 1; }
+.help-modal-close:hover { color: #f85149; }
+.help-modal-body { padding: 20px; font-size: 14px; line-height: 1.6; color: #c9d1d9; }
+.help-modal-body h4 { color: #e6edf3; margin: 18px 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; }
+.help-modal-body h4:first-child { margin-top: 0; }
+.help-modal-body p { margin: 6px 0 12px; }
+.help-example { background: #0d1117; border: 1px solid #21262d; border-radius: 6px; padding: 8px 12px; margin: 6px 0; font-size: 13px; }
+.help-example code { display: block; color: #79c0ff; font-family: 'Cascadia Code','JetBrains Mono','Consolas',monospace; font-size: 12px; margin-bottom: 2px; user-select: all; }
+.help-example span { color: #8b949e; font-size: 12px; }
+.help-tip { color: #484f58; font-size: 12px; font-style: italic; }
+.help-notes { margin: 8px 0 0 18px; color: #8b949e; font-size: 13px; }
+.help-notes li { margin: 4px 0; }
+.help-notes code { color: #79c0ff; font-family: 'Cascadia Code','JetBrains Mono','Consolas',monospace; font-size: 12px; }
+kbd { background: #21262d; border: 1px solid #30363d; border-radius: 3px; padding: 1px 5px; font-size: 11px; font-family: inherit; color: #c9d1d9; }
+
+/* ---- Empty State ---- */
+.empty-state { color: #484f58; text-align: center; padding: 40px 20px; font-size: 14px; }
+
+/* ---- Responsive ---- */
+@media (max-width: 800px) {
+  .split-view { flex-direction: column; }
+  .panel { max-height: none; }
+  .panel-left { border-right: 1px solid #30363d; border-radius: 6px; }
+  .panel-right { border-radius: 6px; }
+  .toolbar input[type="text"] { width: 160px; }
+}
+</style>
+<script>
+/**
+ * jmespath.js 0.16.0 — embedded for standalone use.
+ */
+!function(e){"use strict";function t(e){return null!==e&&"[object Array]"===Object.prototype.toString.call(e)}function r(e){return null!==e&&"[object Object]"===Object.prototype.toString.call(e)}function n(e,i){if(e===i)return!0;if(Object.prototype.toString.call(e)!==Object.prototype.toString.call(i))return!1;if(!0===t(e)){if(e.length!==i.length)return!1;for(var s=0;s<e.length;s++)if(!1===n(e[s],i[s]))return!1;return!0}if(!0===r(e)){var a={};for(var u in e)if(hasOwnProperty.call(e,u)){if(!1===n(e[u],i[u]))return!1;a[u]=!0}for(var o in i)if(hasOwnProperty.call(i,o)&&!0!==a[o])return!1;return!0}return!1}function i(e){if(""===e||!1===e||null===e)return!0;if(t(e)&&0===e.length)return!0;if(r(e)){for(var n in e)if(e.hasOwnProperty(n))return!1;return!0}return!1}var s;s="function"==typeof String.prototype.trimLeft?function(e){return e.trimLeft()}:function(e){return e.match(/^\s*(.*)/)[1]};var a=0,u=2,o={0:"number",1:"any",2:"string",3:"array",4:"object",5:"boolean",6:"expression",7:"null",8:"Array<number>",9:"Array<string>"},c="EOF",h="UnquotedIdentifier",l="QuotedIdentifier",_="Rbracket",f="Rparen",p="Comma",v="Colon",d="Rbrace",y="Number",g="Current",m="Expref",k="Pipe",x="Or",w="And",S="EQ",b="GT",E="LT",T="GTE",j="LTE",N="NE",O="Flatten",P="Star",M="Filter",I="Dot",L="Not",R="Lbrace",A="Lbracket",F="Lparen",H="Literal",C={".":I,"*":P,",":p,":":v,"{":R,"}":d,"]":_,"(":F,")":f,"@":g},B={"<":!0,">":!0,"=":!0,"!":!0},J={" ":!0,"\t":!0,"\n":!0};function U(e){return e>="0"&&e<="9"||"-"===e}function z(){}z.prototype={tokenize:function(e){var t,r,n,i,s=[];for(this._current=0;this._current<e.length;)if((i=e[this._current])>="a"&&i<="z"||i>="A"&&i<="Z"||"_"===i)t=this._current,r=this._consumeUnquotedIdentifier(e),s.push({type:h,value:r,start:t});else if(void 0!==C[e[this._current]])s.push({type:C[e[this._current]],value:e[this._current],start:this._current}),this._current++;else if(U(e[this._current]))n=this._consumeNumber(e),s.push(n);else if("["===e[this._current])n=this._consumeLBracket(e),s.push(n);else if('"'===e[this._current])t=this._current,r=this._consumeQuotedIdentifier(e),s.push({type:l,value:r,start:t});else if("'"===e[this._current])t=this._current,r=this._consumeRawStringLiteral(e),s.push({type:H,value:r,start:t});else if("`"===e[this._current]){t=this._current;var L=this._consumeLiteral(e);s.push({type:H,value:L,start:t})}else if(void 0!==B[e[this._current]])s.push(this._consumeOperator(e));else if(void 0!==J[e[this._current]])this._current++;else if("&"===e[this._current])t=this._current,this._current++,"&"===e[this._current]?(this._current++,s.push({type:w,value:"&&",start:t})):s.push({type:m,value:"&",start:t});else{if("|"!==e[this._current]){var u=new Error("Unknown character:"+e[this._current]);throw u.name="LexerError",u}t=this._current,this._current++,"|"===e[this._current]?(this._current++,s.push({type:x,value:"||",start:t})):s.push({type:k,value:"|",start:t})}return s},_consumeUnquotedIdentifier:function(e){var t,r=this._current;for(this._current++;this._current<e.length&&((t=e[this._current])>="a"&&t<="z"||t>="A"&&t<="Z"||t>="0"&&t<="9"||"_"===t);)this._current++;return e.slice(r,this._current)},_consumeQuotedIdentifier:function(e){var t=this._current;this._current++;for(var r=e.length;'"'!==e[this._current]&&this._current<r;){var n=this._current;"\\"!==e[n]||"\\"!==e[n+1]&&'"'!==e[n+1]?n++:n+=2,this._current=n}return this._current++,JSON.parse(e.slice(t,this._current))},_consumeRawStringLiteral:function(e){var t=this._current;this._current++;for(var r=e.length;"'"!==e[this._current]&&this._current<r;){var n=this._current;"\\"!==e[n]||"\\"!==e[n+1]&&"'"!==e[n+1]?n++:n+=2,this._current=n}return this._current++,e.slice(t+1,this._current-1).replace("\\'","'")},_consumeNumber:function(e){var t=this._current;this._current++;for(var r=e.length;U(e[this._current])&&this._current<r;)this._current++;var n=parseInt(e.slice(t,this._current));return{type:y,value:n,start:t}},_consumeLBracket:function(e){var t=this._current;return this._current++,"?"===e[this._current]?(this._current++,{type:M,value:"[?",start:t}):"]"===e[this._current]?(this._current++,{type:O,value:"[]",start:t}):{type:A,value:"[",start:t}},_consumeOperator:function(e){var t=this._current,r=e[t];return this._current++,"!"===r?"="===e[this._current]?(this._current++,{type:N,value:"!=",start:t}):{type:L,value:"!",start:t}:"<"===r?"="===e[this._current]?(this._current++,{type:j,value:"<=",start:t}):{type:E,value:"<",start:t}:">"===r?"="===e[this._current]?(this._current++,{type:T,value:">=",start:t}):{type:b,value:">",start:t}:"="===r&&"="===e[this._current]?(this._current++,{type:S,value:"==",start:t}):void 0},_consumeLiteral:function(e){this._current++;for(var t,r=this._current,n=e.length;"`"!==e[this._current]&&this._current<n;){var i=this._current;"\\"!==e[i]||"\\"!==e[i+1]&&"`"!==e[i+1]?i++:i+=2,this._current=i}var L=s(e.slice(r,this._current));return L=L.replace("\\`","`"),t=this._looksLikeJSON(L)?JSON.parse(L):JSON.parse('"'+L+'"'),this._current++,t},_looksLikeJSON:function(e){if(""===e)return!1;if('[{"'.indexOf(e[0])>=0)return!0;if(["true","false","null"].indexOf(e)>=0)return!0;if(!("-0123456789".indexOf(e[0])>=0))return!1;try{return JSON.parse(e),!0}catch(e){return!1}}};var D={};function K(){}function V(e){this.runtime=e}function Q(e){this._interpreter=e,this.functionTable={abs:{_func:this._functionAbs,_signature:[{types:[a]}]},avg:{_func:this._functionAvg,_signature:[{types:[8]}]},ceil:{_func:this._functionCeil,_signature:[{types:[a]}]},contains:{_func:this._functionContains,_signature:[{types:[u,3]},{types:[1]}]},ends_with:{_func:this._functionEndsWith,_signature:[{types:[u]},{types:[u]}]},floor:{_func:this._functionFloor,_signature:[{types:[a]}]},length:{_func:this._functionLength,_signature:[{types:[u,3,4]}]},map:{_func:this._functionMap,_signature:[{types:[6]},{types:[3]}]},max:{_func:this._functionMax,_signature:[{types:[8,9]}]},merge:{_func:this._functionMerge,_signature:[{types:[4],variadic:!0}]},max_by:{_func:this._functionMaxBy,_signature:[{types:[3]},{types:[6]}]},sum:{_func:this._functionSum,_signature:[{types:[8]}]},starts_with:{_func:this._functionStartsWith,_signature:[{types:[u]},{types:[u]}]},min:{_func:this._functionMin,_signature:[{types:[8,9]}]},min_by:{_func:this._functionMinBy,_signature:[{types:[3]},{types:[6]}]},type:{_func:this._functionType,_signature:[{types:[1]}]},keys:{_func:this._functionKeys,_signature:[{types:[4]}]},values:{_func:this._functionValues,_signature:[{types:[4]}]},sort:{_func:this._functionSort,_signature:[{types:[9,8]}]},sort_by:{_func:this._functionSortBy,_signature:[{types:[3]},{types:[6]}]},join:{_func:this._functionJoin,_signature:[{types:[u]},{types:[9]}]},reverse:{_func:this._functionReverse,_signature:[{types:[u,3]}]},to_array:{_func:this._functionToArray,_signature:[{types:[1]}]},to_string:{_func:this._functionToString,_signature:[{types:[1]}]},to_number:{_func:this._functionToNumber,_signature:[{types:[1]}]},not_null:{_func:this._functionNotNull,_signature:[{types:[1],variadic:!0}]}}}D[c]=0,D[h]=0,D[l]=0,D[_]=0,D[f]=0,D[p]=0,D[d]=0,D[y]=0,D[g]=0,D[m]=0,D[k]=1,D[x]=2,D[w]=3,D[S]=5,D[b]=5,D[E]=5,D[T]=5,D[j]=5,D[N]=5,D[O]=9,D[P]=20,D[M]=21,D[I]=40,D[L]=45,D[R]=50,D[A]=55,D[F]=60,K.prototype={parse:function(e){this._loadTokens(e),this.index=0;var t=this.expression(0);if(this._lookahead(0)!==c){var r=this._lookaheadToken(0),n=new Error("Unexpected token type: "+r.type+", value: "+r.value);throw n.name="ParserError",n}return t},_loadTokens:function(e){var t=(new z).tokenize(e);t.push({type:c,value:"",start:e.length}),this.tokens=t},expression:function(e){var t=this._lookaheadToken(0);this._advance();for(var r=this.nud(t),n=this._lookahead(0);e<D[n];)this._advance(),r=this.led(n,r),n=this._lookahead(0);return r},_lookahead:function(e){return this.tokens[this.index+e].type},_lookaheadToken:function(e){return this.tokens[this.index+e]},_advance:function(){this.index++},nud:function(e){var t,r;switch(e.type){case H:return{type:"Literal",value:e.value};case h:return{type:"Field",name:e.value};case l:var n={type:"Field",name:e.value};if(this._lookahead(0)===F)throw new Error("Quoted identifier not allowed for function names.");return n;case L:return{type:"NotExpression",children:[t=this.expression(D.Not)]};case P:return t=null,{type:"ValueProjection",children:[{type:"Identity"},t=this._lookahead(0)===_?{type:"Identity"}:this._parseProjectionRHS(D.Star)]};case M:return this.led(e.type,{type:"Identity"});case R:return this._parseMultiselectHash();case O:return{type:"Projection",children:[{type:O,children:[{type:"Identity"}]},t=this._parseProjectionRHS(D.Flatten)]};case A:return this._lookahead(0)===y||this._lookahead(0)===v?(t=this._parseIndexExpression(),this._projectIfSlice({type:"Identity"},t)):this._lookahead(0)===P&&this._lookahead(1)===_?(this._advance(),this._advance(),{type:"Projection",children:[{type:"Identity"},t=this._parseProjectionRHS(D.Star)]}):this._parseMultiselectList();case g:return{type:g};case m:return{type:"ExpressionReference",children:[r=this.expression(D.Expref)]};case F:for(var i=[];this._lookahead(0)!==f;)this._lookahead(0)===g?(r={type:g},this._advance()):r=this.expression(0),i.push(r);return this._match(f),i[0];default:this._errorToken(e)}},led:function(e,t){var r;switch(e){case I:var n=D.Dot;return this._lookahead(0)!==P?{type:"Subexpression",children:[t,r=this._parseDotRHS(n)]}:(this._advance(),{type:"ValueProjection",children:[t,r=this._parseProjectionRHS(n)]});case k:return r=this.expression(D.Pipe),{type:k,children:[t,r]};case x:return{type:"OrExpression",children:[t,r=this.expression(D.Or)]};case w:return{type:"AndExpression",children:[t,r=this.expression(D.And)]};case F:for(var i,s=t.name,L=[];this._lookahead(0)!==f;)this._lookahead(0)===g?(i={type:g},this._advance()):i=this.expression(0),this._lookahead(0)===p&&this._match(p),L.push(i);return this._match(f),{type:"Function",name:s,children:L};case M:var u=this.expression(0);return this._match(_),{type:"FilterProjection",children:[t,r=this._lookahead(0)===O?{type:"Identity"}:this._parseProjectionRHS(D.Filter),u]};case O:return{type:"Projection",children:[{type:O,children:[t]},this._parseProjectionRHS(D.Flatten)]};case S:case N:case b:case T:case E:case j:return this._parseComparator(t,e);case A:var o=this._lookaheadToken(0);return o.type===y||o.type===v?(r=this._parseIndexExpression(),this._projectIfSlice(t,r)):(this._match(P),this._match(_),{type:"Projection",children:[t,r=this._parseProjectionRHS(D.Star)]});default:this._errorToken(this._lookaheadToken(0))}},_match:function(e){if(this._lookahead(0)!==e){var t=this._lookaheadToken(0),r=new Error("Expected "+e+", got: "+t.type);throw r.name="ParserError",r}this._advance()},_errorToken:function(e){var t=new Error("Invalid token ("+e.type+'): "'+e.value+'"');throw t.name="ParserError",t},_parseIndexExpression:function(){if(this._lookahead(0)===v||this._lookahead(1)===v)return this._parseSliceExpression();var e={type:"Index",value:this._lookaheadToken(0).value};return this._advance(),this._match(_),e},_projectIfSlice:function(e,t){var r={type:"IndexExpression",children:[e,t]};return"Slice"===t.type?{type:"Projection",children:[r,this._parseProjectionRHS(D.Star)]}:r},_parseSliceExpression:function(){for(var e=[null,null,null],t=0,r=this._lookahead(0);r!==_&&t<3;){if(r===v)t++,this._advance();else{if(r!==y){var n=this._lookahead(0),i=new Error("Syntax error, unexpected token: "+n.value+"("+n.type+")");throw i.name="Parsererror",i}e[t]=this._lookaheadToken(0).value,this._advance()}r=this._lookahead(0)}return this._match(_),{type:"Slice",children:e}},_parseComparator:function(e,t){return{type:"Comparator",name:t,children:[e,this.expression(D[t])]}},_parseDotRHS:function(e){var t=this._lookahead(0);return[h,l,P].indexOf(t)>=0?this.expression(e):t===A?(this._match(A),this._parseMultiselectList()):t===R?(this._match(R),this._parseMultiselectHash()):void 0},_parseProjectionRHS:function(e){var t;if(D[this._lookahead(0)]<10)t={type:"Identity"};else if(this._lookahead(0)===A)t=this.expression(e);else if(this._lookahead(0)===M)t=this.expression(e);else{if(this._lookahead(0)!==I){var r=this._lookaheadToken(0),n=new Error("Sytanx error, unexpected token: "+r.value+"("+r.type+")");throw n.name="ParserError",n}this._match(I),t=this._parseDotRHS(e)}return t},_parseMultiselectList:function(){for(var e=[];this._lookahead(0)!==_;){var t=this.expression(0);if(e.push(t),this._lookahead(0)===p&&(this._match(p),this._lookahead(0)===_))throw new Error("Unexpected token Rbracket")}return this._match(_),{type:"MultiSelectList",children:e}},_parseMultiselectHash:function(){for(var e,t,r,n=[],i=[h,l];;){if(e=this._lookaheadToken(0),i.indexOf(e.type)<0)throw new Error("Expecting an identifier token, got: "+e.type);if(t=e.value,this._advance(),this._match(v),r={type:"KeyValuePair",name:t,value:this.expression(0)},n.push(r),this._lookahead(0)===p)this._match(p);else if(this._lookahead(0)===d){this._match(d);break}}return{type:"MultiSelectHash",children:n}}},V.prototype={search:function(e,t){return this.visit(e,t)},visit:function(e,s){var L,u,o,c,h,l,_,f,p;switch(e.type){case"Field":return null!==s&&r(s)?void 0===(l=s[e.name])?null:l:null;case"Subexpression":for(o=this.visit(e.children[0],s),p=1;p<e.children.length;p++)if(null===(o=this.visit(e.children[1],o)))return null;return o;case"IndexExpression":return _=this.visit(e.children[0],s),this.visit(e.children[1],_);case"Index":if(!t(s))return null;var v=e.value;return v<0&&(v=s.length+v),void 0===(o=s[v])&&(o=null),o;case"Slice":if(!t(s))return null;var d=e.children.slice(0),y=this.computeSliceParams(s.length,d),x=y[0],w=y[1],P=y[2];if(o=[],P>0)for(p=x;p<w;p+=P)o.push(s[p]);else for(p=x;p>w;p+=P)o.push(s[p]);return o;case"Projection":var M=this.visit(e.children[0],s);if(!t(M))return null;for(f=[],p=0;p<M.length;p++)null!==(u=this.visit(e.children[1],M[p]))&&f.push(u);return f;case"ValueProjection":if(!r(M=this.visit(e.children[0],s)))return null;f=[];var I=function(e){for(var t=Object.keys(e),r=[],n=0;n<t.length;n++)r.push(e[t[n]]);return r}(M);for(p=0;p<I.length;p++)null!==(u=this.visit(e.children[1],I[p]))&&f.push(u);return f;case"FilterProjection":if(!t(M=this.visit(e.children[0],s)))return null;var L=[],R=[];for(p=0;p<M.length;p++){var q=this.visit(e.children[2],M[p]);if(!i(q))L.push(M[p])}for(var A=0,R=[];A<L.length;A++)null!==(u=this.visit(e.children[1],L[A]))&&R.push(u);return R;case"Comparator":switch(c=this.visit(e.children[0],s),h=this.visit(e.children[1],s),e.name){case S:o=n(c,h);break;case N:o=!n(c,h);break;case b:o=c>h;break;case T:o=c>=h;break;case E:o=c<h;break;case j:o=c<=h;break;default:throw new Error("Unknown comparator: "+e.name)}return o;case O:var F=this.visit(e.children[0],s);if(!t(F))return null;var H=[];for(p=0;p<F.length;p++)t(u=F[p])?H.push.apply(H,u):H.push(u);return H;case"Identity":return s;case"MultiSelectList":if(null===s)return null;for(f=[],p=0;p<e.children.length;p++)f.push(this.visit(e.children[p],s));return f;case"MultiSelectHash":if(null===s)return null;var C;for(f={},p=0;p<e.children.length;p++)f[(C=e.children[p]).name]=this.visit(C.value,s);return f;case"OrExpression":return i(L=this.visit(e.children[0],s))&&(L=this.visit(e.children[1],s)),L;case"AndExpression":return!0===i(c=this.visit(e.children[0],s))?c:this.visit(e.children[1],s);case"NotExpression":return i(c=this.visit(e.children[0],s));case"Literal":return e.value;case k:return _=this.visit(e.children[0],s),this.visit(e.children[1],_);case g:return s;case"Function":var B=[];for(p=0;p<e.children.length;p++)B.push(this.visit(e.children[p],s));return this.runtime.callFunction(e.name,B);case"ExpressionReference":var J=e.children[0];return J.jmespathType=m,J;default:throw new Error("Unknown node type: "+e.type)}},computeSliceParams:function(e,t){var r=t[0],n=t[1],i=t[2],s=[null,null,null];if(null===i)i=1;else if(0===i){var L=new Error("Invalid slice, step cannot be 0");throw L.name="RuntimeError",L}var u=i<0;return r=null===r?u?e-1:0:this.capSliceRange(e,r,i),n=null===n?u?-1:e:this.capSliceRange(e,n,i),s[0]=r,s[1]=n,s[2]=i,s},capSliceRange:function(e,t,r){return t<0?(t+=e)<0&&(t=r<0?-1:0):t>=e&&(t=r<0?e-1:e),t}},Q.prototype={callFunction:function(e,t){var r=this.functionTable[e];if(void 0===r)throw new Error("Unknown function: "+e+"()");return this._validateArgs(e,t,r._signature),r._func.call(this,t)},_validateArgs:function(e,t,r){var n,i,s,L;if(r[r.length-1].variadic){if(t.length<r.length)throw n=1===r.length?" argument":" arguments",new Error("ArgumentError: "+e+"() takes at least"+r.length+n+" but received "+t.length)}else if(t.length!==r.length)throw n=1===r.length?" argument":" arguments",new Error("ArgumentError: "+e+"() takes "+r.length+n+" but received "+t.length);for(var u=0;u<r.length;u++){L=!1,i=r[u].types,s=this._getTypeName(t[u]);for(var c=0;c<i.length;c++)if(this._typeMatches(s,i[c],t[u])){L=!0;break}if(!L){var h=i.map((function(e){return o[e]})).join(",");throw new Error("TypeError: "+e+"() expected argument "+(u+1)+" to be type "+h+" but received type "+o[s]+" instead.")}}},_typeMatches:function(e,t,r){if(1===t)return!0;if(9!==t&&8!==t&&3!==t)return e===t;if(3===t)return 3===e;if(3===e){var n;8===t?n=a:9===t&&(n=u);for(var i=0;i<r.length;i++)if(!this._typeMatches(this._getTypeName(r[i]),n,r[i]))return!1;return!0}},_getTypeName:function(e){switch(Object.prototype.toString.call(e)){case"[object String]":return u;case"[object Number]":return a;case"[object Array]":return 3;case"[object Boolean]":return 5;case"[object Null]":return 7;case"[object Object]":return e.jmespathType===m?6:4}},_functionStartsWith:function(e){return 0===e[0].lastIndexOf(e[1])},_functionEndsWith:function(e){var t=e[0],r=e[1];return-1!==t.indexOf(r,t.length-r.length)},_functionReverse:function(e){if(this._getTypeName(e[0])===u){for(var t=e[0],r="",n=t.length-1;n>=0;n--)r+=t[n];return r}var i=e[0].slice(0);return i.reverse(),i},_functionAbs:function(e){return Math.abs(e[0])},_functionCeil:function(e){return Math.ceil(e[0])},_functionAvg:function(e){for(var t=0,r=e[0],n=0;n<r.length;n++)t+=r[n];return t/r.length},_functionContains:function(e){return e[0].indexOf(e[1])>=0},_functionFloor:function(e){return Math.floor(e[0])},_functionLength:function(e){return r(e[0])?Object.keys(e[0]).length:e[0].length},_functionMap:function(e){for(var t=[],r=this._interpreter,n=e[0],i=e[1],s=0;s<i.length;s++)t.push(r.visit(n,i[s]));return t},_functionMerge:function(e){for(var t={},r=0;r<e.length;r++){var n=e[r];for(var i in n)t[i]=n[i]}return t},_functionMax:function(e){if(e[0].length>0){if(this._getTypeName(e[0][0])===a)return Math.max.apply(Math,e[0]);for(var t=e[0],r=t[0],n=1;n<t.length;n++)r.localeCompare(t[n])<0&&(r=t[n]);return r}return null},_functionMin:function(e){if(e[0].length>0){if(this._getTypeName(e[0][0])===a)return Math.min.apply(Math,e[0]);for(var t=e[0],r=t[0],n=1;n<t.length;n++)t[n].localeCompare(r)<0&&(r=t[n]);return r}return null},_functionSum:function(e){for(var t=0,r=e[0],n=0;n<r.length;n++)t+=r[n];return t},_functionType:function(e){switch(this._getTypeName(e[0])){case a:return"number";case u:return"string";case 3:return"array";case 4:return"object";case 5:return"boolean";case 6:return"expref";case 7:return"null"}},_functionKeys:function(e){return Object.keys(e[0])},_functionValues:function(e){for(var t=e[0],r=Object.keys(t),n=[],i=0;i<r.length;i++)n.push(t[r[i]]);return n},_functionJoin:function(e){var t=e[0];return e[1].join(t)},_functionToArray:function(e){return 3===this._getTypeName(e[0])?e[0]:[e[0]]},_functionToString:function(e){return this._getTypeName(e[0])===u?e[0]:JSON.stringify(e[0])},_functionToNumber:function(e){var t,r=this._getTypeName(e[0]);return r===a?e[0]:r!==u||(t=+e[0],isNaN(t))?null:t},_functionNotNull:function(e){for(var t=0;t<e.length;t++)if(7!==this._getTypeName(e[t]))return e[t];return null},_functionSort:function(e){var t=e[0].slice(0);return t.sort(),t},_functionSortBy:function(e){var t=e[0].slice(0);if(0===t.length)return t;var r=this._interpreter,n=e[1],i=this._getTypeName(r.visit(n,t[0]));if([a,u].indexOf(i)<0)throw new Error("TypeError");for(var s=this,o=[],c=0;c<t.length;c++)o.push([c,t[c]]);o.sort((function(e,t){var L=r.visit(n,e[1]),u=r.visit(n,t[1]);if(s._getTypeName(L)!==i)throw new Error("TypeError: expected "+i+", received "+s._getTypeName(L));if(s._getTypeName(u)!==i)throw new Error("TypeError: expected "+i+", received "+s._getTypeName(u));return L>u?1:L<u?-1:e[0]-t[0]}));for(var h=0;h<o.length;h++)t[h]=o[h][1];return t},_functionMaxBy:function(e){for(var t,r,n=e[1],i=e[0],s=this.createKeyFunction(n,[a,u]),o=-1/0,c=0;c<i.length;c++)(r=s(i[c]))>o&&(o=r,t=i[c]);return t},_functionMinBy:function(e){for(var t,r,n=e[1],i=e[0],s=this.createKeyFunction(n,[a,u]),o=1/0,c=0;c<i.length;c++)(r=s(i[c]))<o&&(o=r,t=i[c]);return t},createKeyFunction:function(e,t){var r=this,n=this._interpreter;return function(i){var s=n.visit(e,i);if(t.indexOf(r._getTypeName(s))<0){var L="TypeError: expected one of "+t+", received "+r._getTypeName(s);throw new Error(L)}return s}}},e.tokenize=function(e){return(new z).tokenize(e)},e.compile=function(e){return(new K).parse(e)},e.search=function(e,t){var r=new K,n=new Q,i=new V(n);n._interpreter=i;var s=r.parse(t);return i.search(s,e)},e.strictDeepEqual=n}("undefined"==typeof exports?this.jmespath={}:exports);
+</script>
+</head>
+<body>
+
+<div class="header">
+  <h1>JCI JSON Comparer</h1>
+  <div class="stats" id="statsBar"></div>
+</div>
+
+<!-- File picker -->
+<div class="file-bar" id="fileBar">
+  <div class="file-group">
+    <label>Left (original):</label>
+    <input type="file" id="fileLeft" accept=".json">
+    <span id="fileLeftName" class="file-name not-loaded">Select file...</span>
+  </div>
+  <div class="file-group">
+    <label>Right (modified):</label>
+    <input type="file" id="fileRight" accept=".json">
+    <span id="fileRightName" class="file-name not-loaded">Select file...</span>
+  </div>
+  <span style="color:#484f58;font-size:12px;">Defaults: SBS_DefaultT1_reorganized.json &amp; SBS_CabResizedT1_reorganized.json</span>
+</div>
+
+<!-- Toolbar (hidden until data loaded) -->
+<div class="toolbar" id="toolbar" style="display:none;">
+  <div class="toolbar-group">
+    <label>Search: <span class="help-btn" onclick="openHelp('filter')" title="How to use Search">&#9432;</span></label>
+    <input type="text" id="filterInput" placeholder='e.g. weight, IP, segmentType' spellcheck="false">
+    <button id="filterBtn">Apply</button>
+  </div>
+  <div class="toolbar-sep"></div>
+  <div class="toolbar-group">
+    <label>JMESPath: <span class="help-btn" onclick="openHelp('jmespath')" title="How to use JMESPath">&#9432;</span></label>
+    <input type="text" id="mapInput" placeholder='e.g. unit.segmentList[*].segmentType' spellcheck="false">
+    <button id="mapBtn">Query</button>
+  </div>
+  <div class="toolbar-sep"></div>
+  <div class="toolbar-group">
+    <button id="expandAllBtn" class="tb-btn" title="Expand all nodes">&#9660; All</button>
+    <button id="collapseAllBtn" class="tb-btn" title="Collapse all nodes">&#9650; All</button>
+  </div>
+</div>
+
+<div class="split-view" id="splitView" style="display:none;">
+  <div class="panel panel-left">
+    <h2 id="panelLeftTitle">Left</h2>
+    <div id="viewLeft"></div>
+  </div>
+  <div class="panel panel-right">
+    <h2 id="panelRightTitle">Right</h2>
+    <div id="viewRight"></div>
+  </div>
+</div>
+
+<div id="tableView" class="table-view" style="display:none;">
+</div>
+
+<script>
+// =====================================================================
+//  DATA (loaded dynamically)
+// =====================================================================
+let DATA_LEFT = null;
+let DATA_RIGHT = null;
+let FILE_LEFT = '';
+let FILE_RIGHT = '';
+
+// =====================================================================
+//  FILE LOADING
+// =====================================================================
+
+function readFileInput(inputId, nameSpanId) {
+  return new Promise(function(resolve) {
+    const input = document.getElementById(inputId);
+    const file = input.files[0];
+    if (!file) { resolve(null); return; }
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      try {
+        const data = JSON.parse(e.target.result);
+        document.getElementById(nameSpanId).textContent = file.name;
+        document.getElementById(nameSpanId).classList.remove('not-loaded');
+        resolve(data);
+      } catch (err) {
+        resolve(null);
+      }
+    };
+    reader.readAsText(file);
+  });
+}
+
+function tryFetch(url) {
+  return fetch(url).then(function(r) {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  });
+}
+
+function checkBothLoaded() {
+  if (DATA_LEFT && DATA_RIGHT) {
+    onDataLoaded();
+  }
+}
+
+function onDataLoaded() {
+  document.getElementById('toolbar').style.display = 'flex';
+  document.getElementById('splitView').style.display = 'flex';
+  document.getElementById('panelLeftTitle').textContent = FILE_LEFT;
+  document.getElementById('panelRightTitle').textContent = FILE_RIGHT;
+  refreshView();
+}
+
+// =====================================================================
+//  UTILITY FUNCTIONS
+// =====================================================================
+
+function esc(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function formatValue(v) {
+  if (v === null || v === undefined) return '<span class="value-null">null</span>';
+  if (typeof v === 'boolean') return '<span class="value-bool">' + v + '</span>';
+  if (typeof v === 'string') return '<span class="value-string">"' + esc(v) + '"</span>';
+  if (typeof v === 'number') return '<span class="value-number">' + v + '</span>';
+  return '<span class="value-same">' + esc(JSON.stringify(v)) + '</span>';
+}
+
+// =====================================================================
+//  DIFF FUNCTIONS
+// =====================================================================
+
+function getValueStatus(leftVal, rightVal) {
+  if (leftVal === undefined || leftVal === null) {
+    if (rightVal === undefined || rightVal === null) return 'same';
+    return 'added';
+  }
+  if (rightVal === undefined || rightVal === null) return 'removed';
+  if (typeof leftVal !== typeof rightVal) return 'changed';
+  if (typeof leftVal !== 'object') {
+    return leftVal !== rightVal ? 'changed' : 'same';
+  }
+  if (leftVal === rightVal) return 'same';
+  try {
+    return JSON.stringify(leftVal) === JSON.stringify(rightVal) ? 'same' : 'changed';
+  } catch (e) {
+    return 'changed';
+  }
+}
+
+function computeStats(left, right) {
+  let changed = 0, added = 0, removed = 0, same = 0;
+
+  function walk(l, r) {
+    if (l === undefined && r === undefined) return;
+    if (l === undefined || r === undefined) {
+      if (l === undefined && r !== undefined) added++;
+      else if (r === undefined && l !== undefined) removed++;
+      return;
+    }
+    if (typeof l !== 'object' || l === null || typeof r !== 'object' || r === null) {
+      if (JSON.stringify(l) === JSON.stringify(r)) same++;
+      else changed++;
+      return;
+    }
+    if (Array.isArray(l) && Array.isArray(r)) {
+      const maxLen = Math.max(l.length, r.length);
+      for (let i = 0; i < maxLen; i++) walk(l[i], r[i]);
+    } else if (!Array.isArray(l) && !Array.isArray(r)) {
+      const allKeys = new Set([...Object.keys(l), ...Object.keys(r)]);
+      for (const key of allKeys) walk(l[key], r[key]);
+    } else {
+      changed++;
+    }
+  }
+
+  walk(left, right);
+  return { changed: changed, added: added, removed: removed, same: same };
+}
+
+// =====================================================================
+//  FULL TREE VIEW
+// =====================================================================
+
+function subtreeMatches(val, filterLower) {
+  if (val === null || val === undefined) return false;
+  const str = JSON.stringify(val).toLowerCase();
+  if (str.includes(filterLower)) return true;
+  if (typeof val === 'object') {
+    for (const k in val) {
+      if (k.toLowerCase().includes(filterLower)) return true;
+      if (subtreeMatches(val[k], filterLower)) return true;
+    }
+  }
+  return false;
+}
+
+function syncOtherPanel(side, path, expanded) {
+  var otherId = side === 'left' ? 'viewRight' : 'viewLeft';
+  var otherChildren = document.querySelector('#' + otherId + ' [data-path="' + path.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"]');
+  if (!otherChildren) return;
+  var otherToggle = otherChildren.parentElement.querySelector('.toggle-icon');
+  if (!otherToggle) return;
+  if (expanded) {
+    otherChildren.classList.remove('hidden');
+    otherToggle.textContent = '\u25BC';
+  } else {
+    otherChildren.classList.add('hidden');
+    otherToggle.textContent = '\u25B6';
+  }
+}
+
+function renderValueNode(key, val, otherVal, side, depth, filterText, path) {
+
+  if (filterText && filterText.trim()) {
+    const ft = filterText.trim().toLowerCase();
+    const keyMatch = key && key.toLowerCase().includes(ft);
+    const checkV = (val != null) ? val : otherVal;
+    const valMatch = checkV != null && JSON.stringify(checkV).toLowerCase().includes(ft);
+    if (!keyMatch && !valMatch) {
+      if (typeof val === 'object' && val !== null) {
+        if (!subtreeMatches(val, ft)) return null;
+      } else if (typeof otherVal === 'object' && otherVal !== null) {
+        if (!subtreeMatches(otherVal, ft)) return null;
+      } else {
+        return null;
+      }
+    }
+  }
+
+  if (val === undefined || val === null) {
+    if (otherVal !== undefined && otherVal !== null) {
+      const div = document.createElement('div');
+      div.className = 'tree-node';
+      const row = document.createElement('div');
+      row.className = 'node-row';
+      row.style.paddingLeft = (depth * 18 + 6) + 'px';
+      row.innerHTML = '<span class="node-key">' + esc(key) + '</span><span class="node-colon">:</span> '
+        + (side === 'left'
+          ? '<span class="value-added">(added)</span>'
+          : '<span class="value-removed">(removed)</span>');
+      div.appendChild(row);
+      return div;
+    }
+    return null;
+  }
+
+  const isBranch = typeof val === 'object' && val !== null;
+  const status = getValueStatus(val, otherVal);
+  const hasChildren = isBranch && (Array.isArray(val) ? val.length > 0 : Object.keys(val).length > 0);
+
+  const div = document.createElement('div');
+  div.className = 'tree-node';
+
+  if (isBranch && hasChildren) {
+    const row = document.createElement('div');
+    row.className = 'node-row branch';
+    row.style.paddingLeft = (depth * 18 + 6) + 'px';
+
+    if (status !== 'same') {
+      row.classList.add('has-diff');
+    }
+
+    const toggle = document.createElement('span');
+    toggle.className = 'toggle-icon';
+    toggle.textContent = '\u25B6';
+
+    const keySpan = document.createElement('span');
+    keySpan.className = 'node-key';
+    keySpan.textContent = key || '';
+
+    const info = document.createElement('span');
+    info.className = 'node-info';
+    if (Array.isArray(val)) {
+      info.textContent = '[' + val.length + ']';
+    } else {
+      info.textContent = '{' + Object.keys(val).length + '}';
+    }
+
+    row.appendChild(toggle);
+    row.appendChild(keySpan);
+    row.appendChild(info);
+
+    div.appendChild(row);
+
+    const childrenDiv = document.createElement('div');
+    childrenDiv.className = 'children hidden';
+    childrenDiv.setAttribute('data-path', path);
+
+    if (Array.isArray(val)) {
+      const otherArr = Array.isArray(otherVal) ? otherVal : [];
+      for (let i = 0; i < val.length; i++) {
+        const childPath = path + '/[' + i + ']';
+        const child = renderValueNode('[' + i + ']', val[i], otherArr[i], side, depth + 1, filterText, childPath);
+        if (child) childrenDiv.appendChild(child);
+      }
+    } else {
+      const allKeys = Object.keys(val);
+      for (let k = 0; k < allKeys.length; k++) {
+        const keyName = allKeys[k];
+        const childPath = path + '/' + keyName;
+        const child = renderValueNode(keyName, val[keyName],
+          (otherVal && typeof otherVal === 'object' && !Array.isArray(otherVal)) ? otherVal[keyName] : undefined,
+          side, depth + 1, filterText, childPath);
+        if (child) childrenDiv.appendChild(child);
+      }
+
+      if (otherVal && typeof otherVal === 'object' && !Array.isArray(otherVal)) {
+        for (const keyName in otherVal) {
+          if (val[keyName] !== undefined) continue;
+          const childPath = path + '/' + keyName;
+          const child = renderValueNode(keyName, undefined, otherVal[keyName], side, depth + 1, filterText, childPath);
+          if (child) childrenDiv.appendChild(child);
+        }
+      }
+    }
+
+    div.appendChild(childrenDiv);
+
+    function toggleBranch() {
+      const isHidden = childrenDiv.classList.contains('hidden');
+      if (isHidden) {
+        childrenDiv.classList.remove('hidden');
+        toggle.textContent = '\u25BC';
+      } else {
+        childrenDiv.classList.add('hidden');
+        toggle.textContent = '\u25B6';
+      }
+      syncOtherPanel(side, path, !childrenDiv.classList.contains('hidden'));
+    }
+
+    row.onclick = function(e) {
+      if (e.target.closest('.toggle-icon')) return;
+      toggleBranch();
+    };
+
+    toggle.onclick = function(e) {
+      e.stopPropagation();
+      toggleBranch();
+    };
+
+  } else {
+    const row = document.createElement('div');
+    row.className = 'node-row';
+    row.style.paddingLeft = (depth * 18 + 6) + 'px';
+
+    let keyHtml = '';
+    if (key != null && key !== '') {
+      keyHtml = '<span class="node-key">' + esc(key) + '</span><span class="node-colon">:</span> ';
+    }
+
+    let valHtml = '';
+    if (status === 'changed') {
+      if (side === 'left') {
+        valHtml = '<span class="value-changed-left">' + esc(JSON.stringify(val)) + '</span>';
+      } else {
+        valHtml = '<span class="value-changed-right">' + esc(JSON.stringify(val)) + '</span>';
+      }
+    } else if (status === 'added') {
+      valHtml = '<span class="value-added">' + esc(JSON.stringify(val)) + '</span>';
+    } else if (status === 'removed') {
+      valHtml = '<span class="value-removed">' + esc(JSON.stringify(val)) + '</span>';
+    } else {
+      valHtml = formatValue(val);
+    }
+
+    row.innerHTML = keyHtml + valHtml;
+    div.appendChild(row);
+  }
+
+  return div;
+}
+
+function renderFullTree(container, leftData, rightData, side, filterText, rootLabel) {
+  container.innerHTML = '';
+  const data = side === 'left' ? leftData : rightData;
+  const otherData = side === 'left' ? rightData : leftData;
+  const label = rootLabel || '(root)';
+  const rootNode = renderValueNode(label, data, otherData, side, 0, filterText, '');
+  if (rootNode) container.appendChild(rootNode);
+}
+
+// =====================================================================
+//  JMESPATH — RENDER RESULTS DIRECTLY IN THE TREE
+// =====================================================================
+
+function renderJmesPathResult(expression, filterText) {
+  let leftResult, rightResult;
+  try {
+    leftResult = jmespath.search(DATA_LEFT, expression);
+    rightResult = jmespath.search(DATA_RIGHT, expression);
+  } catch (e) {
+    document.getElementById('viewLeft').innerHTML = '<div class="empty-state" style="margin-top:20px;">\u26A0 Error: ' + esc(e.message) + '</div>';
+    document.getElementById('viewRight').innerHTML = '';
+    return;
+  }
+
+  // Compute stats on the result data
+  var stats = computeStats(leftResult, rightResult);
+  var resultSummary = '';
+  if (leftResult === null && rightResult === null) {
+    resultSummary = 'Query returned \u2205 (no match)';
+  } else if (Array.isArray(leftResult) && Array.isArray(rightResult)) {
+    var len = Math.max(leftResult.length, rightResult.length);
+    resultSummary = len + ' item(s), ' + (stats.changed + stats.added + stats.removed) + ' difference(s), ' + stats.same + ' match(es)';
+  } else {
+    resultSummary = (stats.changed + stats.added + stats.removed) > 0 ? 'Different' : 'Match';
+  }
+
+  // Show expression + summary in stats bar
+  document.getElementById('statsBar').innerHTML =
+    '<span class="stat jmespath-active">JMESPath\u2192 ' + esc(expression) + '</span>'
+    + '<span class="stat stat-total">' + resultSummary + '</span>'
+    + '<span class="stat stat-changed">Changed: ' + stats.changed + '</span>'
+    + '<span class="stat stat-added">Added: ' + stats.added + '</span>'
+    + '<span class="stat stat-removed">Removed: ' + stats.removed + '</span>'
+    + '<span class="stat stat-same">Same: ' + stats.same + '</span>';
+
+  renderFullTree(document.getElementById('viewLeft'), leftResult, rightResult, 'left', filterText, expression);
+  renderFullTree(document.getElementById('viewRight'), leftResult, rightResult, 'right', filterText, expression);
+}
+
+// =====================================================================
+//  RESULT DIMENSIONS HELPER
+// =====================================================================
+
+function describeResult(v) {
+  if (v === null || v === undefined) return '\u2205';
+  if (typeof v === 'string') return 'string(' + v.length + ')';
+  if (typeof v === 'number') return 'number';
+  if (typeof v === 'boolean') return 'boolean';
+  if (Array.isArray(v)) return 'array[' + v.length + ']';
+  return 'object{' + Object.keys(v).length + '}';
+}
+
+// =====================================================================
+//  VIEW MANAGEMENT
+// =====================================================================
+
+var currentFilter = '';
+var currentMap = '';
+
+function refreshView() {
+  if (!DATA_LEFT || !DATA_RIGHT) return;
+
+  var filterExpr = document.getElementById('filterInput').value;
+  var mapExpr = document.getElementById('mapInput').value;
+  currentFilter = filterExpr;
+  currentMap = mapExpr;
+
+  document.getElementById('splitView').style.display = 'flex';
+
+  if (mapExpr && mapExpr.trim()) {
+    // JMESPath mode: show query result in the tree
+    renderJmesPathResult(mapExpr, filterExpr);
+  } else {
+    // Full JSON tree mode
+    var stats = computeStats(DATA_LEFT, DATA_RIGHT);
+    document.getElementById('statsBar').innerHTML =
+      '<span class="stat stat-total">Total differences: ' + (stats.changed + stats.added + stats.removed) + '</span>' +
+      '<span class="stat stat-changed">Changed: ' + stats.changed + '</span>' +
+      '<span class="stat stat-added">Added: ' + stats.added + '</span>' +
+      '<span class="stat stat-removed">Removed: ' + stats.removed + '</span>' +
+      '<span class="stat stat-same">Same: ' + stats.same + '</span>';
+
+    renderFullTree(document.getElementById('viewLeft'), DATA_LEFT, DATA_RIGHT, 'left', filterExpr);
+    renderFullTree(document.getElementById('viewRight'), DATA_LEFT, DATA_RIGHT, 'right', filterExpr);
+  }
+}
+
+// =====================================================================
+// =====================================================================
+
+document.addEventListener('DOMContentLoaded', function() {
+  // File inputs
+  document.getElementById('fileLeft').addEventListener('change', function() {
+    readFileInput('fileLeft', 'fileLeftName').then(function(data) {
+      DATA_LEFT = data;
+      checkBothLoaded();
+    });
+  });
+  document.getElementById('fileRight').addEventListener('change', function() {
+    readFileInput('fileRight', 'fileRightName').then(function(data) {
+      DATA_RIGHT = data;
+      checkBothLoaded();
+    });
+  });
+  // Toolbar — filter
+  document.getElementById('filterInput').addEventListener('input', function() {
+    refreshView();
+  });
+  document.getElementById('filterInput').addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') { this.value = ''; refreshView(); }
+  });
+  // Toolbar — JMESPath (on Enter only, not live — query can be expensive)
+  document.getElementById('mapInput').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') refreshView();
+    if (e.key === 'Escape') { this.value = ''; refreshView(); }
+  });
+  document.getElementById('filterBtn').addEventListener('click', refreshView);
+  document.getElementById('mapBtn').addEventListener('click', refreshView);
+
+  // Scroll sync between left and right panels
+  // Uses requestAnimationFrame + value check to avoid sync layout during toggles
+  var scrollSyncPending = null;
+
+  function doScrollSync() {
+    if (!scrollSyncPending) return;
+    var s = scrollSyncPending.source;
+    var t = scrollSyncPending.target;
+    scrollSyncPending = null;
+    if (t.scrollTop !== s.scrollTop) t.scrollTop = s.scrollTop;
+    if (t.scrollLeft !== s.scrollLeft) t.scrollLeft = s.scrollLeft;
+  }
+
+  function syncScroll(source, target) {
+    return function() {
+      if (!scrollSyncPending) requestAnimationFrame(doScrollSync);
+      scrollSyncPending = { source: source, target: target };
+    };
+  }
+  // The .panel divs have overflow-y: auto, that's where scrolling happens
+  var panelLeft = document.querySelector('.panel-left');
+  var panelRight = document.querySelector('.panel-right');
+  panelLeft.addEventListener('scroll', syncScroll(panelLeft, panelRight), { passive: true });
+  panelRight.addEventListener('scroll', syncScroll(panelRight, panelLeft), { passive: true });
+
+  // Expand / Collapse all
+  function expandAll() {
+    document.querySelectorAll('#viewLeft .children, #viewRight .children').forEach(function(el) {
+      el.classList.remove('hidden');
+    });
+    document.querySelectorAll('#viewLeft .toggle-icon, #viewRight .toggle-icon').forEach(function(el) {
+      el.textContent = '\u25BC';
+    });
+  }
+  function collapseAll() {
+    document.querySelectorAll('#viewLeft .children, #viewRight .children').forEach(function(el) {
+      el.classList.add('hidden');
+    });
+    document.querySelectorAll('#viewLeft .toggle-icon, #viewRight .toggle-icon').forEach(function(el) {
+      el.textContent = '\u25B6';
+    });
+  }
+  document.getElementById('expandAllBtn').addEventListener('click', expandAll);
+  document.getElementById('collapseAllBtn').addEventListener('click', collapseAll);
+
+  // Try URL params first
+  const params = new URLSearchParams(window.location.search);
+  if (params.has('left') && params.has('right')) {
+    Promise.all([tryFetch(params.get('left')), tryFetch(params.get('right'))])
+      .then(function(results) {
+        DATA_LEFT = results[0];
+        DATA_RIGHT = results[1];
+        FILE_LEFT = params.get('left');
+        FILE_RIGHT = params.get('right');
+        document.getElementById('fileLeftName').textContent = FILE_LEFT;
+        document.getElementById('fileLeftName').classList.remove('not-loaded');
+        document.getElementById('fileRightName').textContent = FILE_RIGHT;
+        document.getElementById('fileRightName').classList.remove('not-loaded');
+        onDataLoaded();
+      })
+      .catch(function() {
+        // URL params failed — user picks files manually
+      });
+  }
+});
+</script>
+
+<!-- HELP MODAL -->
+<div class="help-overlay" id="helpOverlay" onclick="closeHelp()">
+  <div class="help-modal" onclick="event.stopPropagation()">
+    <div class="help-modal-header">
+      <span id="helpModalTitle">Help</span>
+      <span class="help-modal-close" onclick="closeHelp()">&times;</span>
+    </div>
+    <div class="help-modal-body" id="helpModalBody">
+    </div>
+  </div>
+</div>
+
+<script>
+function openHelp(topic) {
+  var body = document.getElementById('helpModalBody');
+  var title = document.getElementById('helpModalTitle');
+  if (topic === 'filter') {
+    title.textContent = 'Search — How to Filter the Tree';
+    body.innerHTML = '<p>Type any text to <strong>hide nodes</strong> whose keys and values don\'t contain it. The tree shows only branches that have a match somewhere in their subtree.</p>'
+      + '<h4>Examples</h4>'
+      + '<div class="help-example"><code>weight</code><span>Show all nodes that mention "weight" (key or value)</span></div>'
+      + '<div class="help-example"><code>IP</code><span>Show only IP-segment related nodes</span></div>'
+      + '<div class="help-example"><code>segmentType</code><span>Show segment type fields</span></div>'
+      + '<div class="help-example"><code>800</code><span>Show nodes with value 800</span></div>'
+      + '<p class="help-tip">The filter updates as you type. Press <kbd>Escape</kbd> to clear.</p>';
+  } else {
+    title.textContent = 'JMESPath — Query, Filter & Map';
+    body.innerHTML = '<p>JMESPath is a query language for JSON, similar to <strong>JavaScript\'s .map() + .filter()</strong>. Write an expression and it runs against both datasets, showing a preview and a diff table.</p>'
+      + '<h4>Get a field from every segment (like .map())</h4>'
+      + '<div class="help-example"><code>unit.segmentList[*].segmentType</code><span>All segment types as a flat array</span></div>'
+      + '<div class="help-example"><code>unit.segmentList[*].weight</code><span>All weights as a flat array</span></div>'
+      + '<h4>Reshape objects (like .map() returning objects)</h4>'
+      + '<div class="help-example"><code>unit.segmentList[*].{id: id, type: segmentType, weight: weight}</code><span>New objects with only id, type, weight</span></div>'
+      + '<div class="help-example"><code>unit.segmentList[*].{segId: segmentIP_ID, x: geometry.x, y: geometry.y}</code><span>Coordinates + ID from nested objects</span></div>'
+      + '<div class="help-example"><code>unit.segmentList[*].[segmentType, weight]</code><span>Array of pairs like [["IP",858], ...]</span></div>'
+      + '<h4>Filter items (like .filter())</h4>'
+      + '<div class="help-example"><code>unit.segmentList[?weight &gt; `800`]</code><span>Segments with weight over 800</span></div>'
+      + '<div class="help-example"><code>unit.segmentList[?segmentType == `IP`]</code><span>Only IP-type segments</span></div>'
+      + '<h4>Filter + reshape together</h4>'
+      + '<div class="help-example"><code>unit.segmentList[?weight &gt; `800`].{type: segmentType, weight: weight}</code><span>Filter then map in one expression</span></div>'
+      + '<h4>Other useful examples</h4>'
+      + '<div class="help-example"><code>unit.segmentList[*].segmentType | sort(@)</code><span>Sorted unique types</span></div>'
+      + '<div class="help-example"><code>unit.id</code><span>Simple scalar field</span></div>'
+      + '<div class="help-example"><code>unit.segmentList[0]</code><span>First segment (full object)</span></div>'
+      + '<h4>Syntax notes</h4>'
+      + '<ul class="help-notes">'
+      + '<li><code>[*]</code> means "iterate over all items in the array"</li>'
+      + '<li><code>[?condition]</code> means "filter items where condition is true"</li>'
+      + '<li>Use <strong>backticks</strong> for literal values: <code>`800`</code>, <code>`IP`</code>, <code>`true`</code></li>'
+      + '<li>The query always starts from the <strong>root</strong> of the JSON, so paths begin with <code>unit.</code></li>'
+      + '<li>Press <kbd>Enter</kbd> or click <strong>Query</strong> to execute</li>'
+      + '</ul>';
+  }
+  document.getElementById('helpOverlay').classList.add('open');
+}
+function closeHelp() {
+  document.getElementById('helpOverlay').classList.remove('open');
+}
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeHelp();
+});
+</script>
+</body>
+</html>
