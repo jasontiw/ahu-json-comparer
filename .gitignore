@@ -1,8 +1,2 @@
-__pycache__/
-*.pyc
-.pytest_cache/
-.venv/
-dist/
-*.egg-info/
 diff.json
 diff.html
