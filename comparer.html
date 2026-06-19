@@ -193,6 +193,13 @@ kbd { background: #21262d; border: 1px solid #30363d; border-radius: 3px; paddin
   </div>
   <div class="toolbar-sep"></div>
   <div class="toolbar-group">
+    <label>
+      <input type="checkbox" id="reorganizeToggle" checked>
+      Reorganize
+    </label>
+  </div>
+  <div class="toolbar-sep"></div>
+  <div class="toolbar-group">
     <button id="expandAllBtn" class="tb-btn" title="Expand all nodes">&#9660; All</button>
     <button id="collapseAllBtn" class="tb-btn" title="Collapse all nodes">&#9650; All</button>
   </div>
@@ -229,6 +236,147 @@ let FILE_RIGHT = '';
 let NODE_MAP = new Map();          // key: side:path → childrenDiv for sync
 let CACHED_STATS = null;          // precomputed stats from onDataLoaded
 let filterTimer = null;           // debounce handle for filter input
+let DATA_LEFT_RAW = null;
+let DATA_RIGHT_RAW = null;
+let reorganizeEnabled = true;
+
+// =====================================================================
+//  REORGANIZER — ported from Python comparer
+// =====================================================================
+const _SINGLE_REF_LISTS = {
+  openingList: { refField: 'associatedUISegmentID', targetKey: 'openings' },
+  bulkheadList: { refField: 'associatedUISegmentID', targetKey: 'bulkheads' },
+  coilPanelList: { refField: 'associatedSegmentID', targetKey: 'coilPanels' },
+};
+
+const _MULTI_REF_LISTS = [
+  'airPathList',
+  'cabinetList',
+  'shippingSkidList',
+  'drawingViewList',
+];
+
+const _NULL_GUID = '00000000-0000-0000-0000-000000000000';
+
+function _buildSegmentLookup(segments) {
+  const lookup = {};
+  for (let i = 0; i < segments.length; i++) {
+    lookup[segments[i].id] = segments[i];
+  }
+  return lookup;
+}
+
+function _nestSingleRef(segmentLookup, items, refField, targetKey) {
+  const unmatched = [];
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const refValue = item[refField] || '';
+    if (!refValue || refValue === _NULL_GUID) {
+      unmatched.push(item);
+      continue;
+    }
+    const segment = segmentLookup[refValue];
+    if (segment === undefined) {
+      unmatched.push(item);
+      continue;
+    }
+    if (!segment[targetKey]) {
+      segment[targetKey] = [];
+    }
+    segment[targetKey].push(item);
+  }
+  return unmatched;
+}
+
+function _makeLightweightRef(sourceList, item, refEntry) {
+  return {
+    sourceList: sourceList,
+    itemId: item.id || '',
+    sequence: refEntry.sequence || 0,
+  };
+}
+
+function _buildMultiRefIndex(multiRefLists) {
+  const index = {};
+  for (const listName in multiRefLists) {
+    if (!Object.hasOwn(multiRefLists, listName)) continue;
+    const items = multiRefLists[listName];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const refs = item.segmentReferenceList;
+      if (!refs || !Array.isArray(refs)) continue;
+      for (let j = 0; j < refs.length; j++) {
+        const refEntry = refs[j];
+        const segmentId = refEntry.segmentID || '';
+        if (!segmentId || segmentId === _NULL_GUID) continue;
+        if (!index[segmentId]) {
+          index[segmentId] = [];
+        }
+        index[segmentId].push(_makeLightweightRef(listName, item, refEntry));
+      }
+    }
+  }
+  return index;
+}
+
+function reorganize(data) {
+  const result = JSON.parse(JSON.stringify(data));
+  const resultUnit = result.unit;
+  const segments = resultUnit && resultUnit.segmentList;
+  if (!Array.isArray(segments) || segments.length === 0) {
+    return result;
+  }
+  const segmentLookup = _buildSegmentLookup(segments);
+  const unmatched = {};
+  const consumed = new Set();
+
+  for (const listName in _SINGLE_REF_LISTS) {
+    if (!Object.hasOwn(_SINGLE_REF_LISTS, listName)) continue;
+    const { refField, targetKey } = _SINGLE_REF_LISTS[listName];
+    const items = resultUnit[listName];
+    if (!Array.isArray(items)) continue;
+    if (items.length > 0) {
+      const unmatchedItems = _nestSingleRef(segmentLookup, items, refField, targetKey);
+      if (unmatchedItems.length > 0) {
+        unmatched[targetKey] = unmatchedItems;
+      }
+    }
+    consumed.add(listName);
+  }
+
+  const multiRefItems = {};
+  for (let i = 0; i < _MULTI_REF_LISTS.length; i++) {
+    const listName = _MULTI_REF_LISTS[i];
+    const items = resultUnit[listName];
+    if (Array.isArray(items) && items.length > 0) {
+      multiRefItems[listName] = items;
+    }
+  }
+
+  if (Object.keys(multiRefItems).length > 0) {
+    const refIndex = _buildMultiRefIndex(multiRefItems);
+    for (const segId in refIndex) {
+      if (!Object.hasOwn(refIndex, segId)) continue;
+      const segment = segmentLookup[segId];
+      if (segment !== undefined) {
+        if (!segment.relatedReferences) {
+          segment.relatedReferences = [];
+        }
+        segment.relatedReferences.push(...refIndex[segId]);
+      }
+    }
+  }
+
+  for (const listName of consumed) {
+    delete resultUnit[listName];
+  }
+
+  if (Object.keys(unmatched).length > 0) {
+    resultUnit._unmatched = unmatched;
+  }
+
+  return result;
+}
 
 // =====================================================================
 //  FILE LOADING
@@ -268,6 +416,12 @@ function checkBothLoaded() {
 }
 
 function onDataLoaded() {
+  DATA_LEFT_RAW = JSON.parse(JSON.stringify(DATA_LEFT));
+  DATA_RIGHT_RAW = JSON.parse(JSON.stringify(DATA_RIGHT));
+  if (reorganizeEnabled) {
+    DATA_LEFT = reorganize(DATA_LEFT);
+    DATA_RIGHT = reorganize(DATA_RIGHT);
+  }
   document.getElementById('toolbar').style.display = 'flex';
   document.getElementById('splitView').style.display = 'flex';
   document.getElementById('panelLeftTitle').textContent = FILE_LEFT;
@@ -631,6 +785,15 @@ function renderJmesPathResult(expression, filterText) {
     return;
   }
 
+  if (reorganizeEnabled) {
+    if (leftResult && typeof leftResult === 'object' && !Array.isArray(leftResult) && leftResult.unit) {
+      leftResult = reorganize(leftResult);
+    }
+    if (rightResult && typeof rightResult === 'object' && !Array.isArray(rightResult) && rightResult.unit) {
+      rightResult = reorganize(rightResult);
+    }
+  }
+
   // Compute stats on the result data
   var stats = computeStats(leftResult, rightResult);
   var resultSummary = '';
@@ -748,6 +911,22 @@ document.addEventListener('DOMContentLoaded', function() {
   });
   document.getElementById('filterBtn').addEventListener('click', refreshView);
   document.getElementById('mapBtn').addEventListener('click', refreshView);
+
+  // Reorganize toggle — force re-render by resetting dedup guards
+  document.getElementById('reorganizeToggle').addEventListener('change', function() {
+    reorganizeEnabled = this.checked;
+    if (!DATA_LEFT_RAW) return;
+    DATA_LEFT = reorganizeEnabled
+      ? reorganize(JSON.parse(JSON.stringify(DATA_LEFT_RAW)))
+      : JSON.parse(JSON.stringify(DATA_LEFT_RAW));
+    DATA_RIGHT = reorganizeEnabled
+      ? reorganize(JSON.parse(JSON.stringify(DATA_RIGHT_RAW)))
+      : JSON.parse(JSON.stringify(DATA_RIGHT_RAW));
+    CACHED_STATS = computeStats(DATA_LEFT, DATA_RIGHT);
+    currentFilter = null;
+    currentMap = null;
+    refreshView();
+  });
 
   // Scroll sync between left and right panels
   // Uses requestAnimationFrame + value check to avoid sync layout during toggles
