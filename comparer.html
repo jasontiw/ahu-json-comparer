@@ -47,10 +47,11 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0d1117; colo
 
 /* ---- Split View ---- */
 .split-view { display: flex; gap: 2px; }
-.panel { flex: 1; min-width: 0; overflow-y: auto; max-height: calc(100vh - 200px); padding: 12px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; }
+.panel { flex: 1; min-width: 0; overflow-y: auto; max-height: calc(100vh - 200px); background: #0d1117; border: 1px solid #30363d; border-radius: 6px; }
 .panel-left { border-right: none; border-top-right-radius: 0; border-bottom-right-radius: 0; }
 .panel-right { border-top-left-radius: 0; border-bottom-left-radius: 0; }
-.panel h2 { font-size: 13px; font-weight: 600; color: #8b949e; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid #21262d; text-transform: uppercase; letter-spacing: 0.5px; }
+.panel h2 { font-size: 13px; font-weight: 600; color: #8b949e; margin-bottom: 10px; padding: 12px 12px 8px; border-bottom: 1px solid #21262d; text-transform: uppercase; letter-spacing: 0.5px; }
+#viewLeft, #viewRight { padding: 0 12px 12px; }
 
 /* ---- Tree View ---- */
 .tree-node { }
@@ -125,6 +126,17 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0d1117; colo
 .help-notes code { color: #79c0ff; font-family: 'Cascadia Code','JetBrains Mono','Consolas',monospace; font-size: 12px; }
 kbd { background: #21262d; border: 1px solid #30363d; border-radius: 3px; padding: 1px 5px; font-size: 11px; font-family: inherit; color: #c9d1d9; }
 
+/* ---- Breadcrumb ---- */
+.breadcrumb { position: sticky; top: 0; z-index: 20; background: #0d1117; padding: 3px 12px; font-size: 11px; font-family: 'Cascadia Code','JetBrains Mono','Consolas',monospace; border-bottom: 1px solid #30363d; min-height: 20px; display: flex; align-items: center; gap: 1px; overflow-x: auto; white-space: nowrap; }
+.breadcrumb::-webkit-scrollbar { height: 2px; }
+.breadcrumb::-webkit-scrollbar-thumb { background: #30363d; border-radius: 2px; }
+.bc-root { color: #8b949e; flex-shrink: 0; }
+.bc-sep { color: #484f58; flex-shrink: 0; padding: 0 2px; }
+.bc-seg { color: #58a6ff; cursor: default; flex-shrink: 0; white-space: nowrap; }
+.bc-seg:hover { color: #79c0ff; text-decoration: underline; }
+/* Larger click target for segments — click jumps to that node */
+.bc-seg { padding: 2px 4px; margin: -2px -4px; }
+
 /* ---- Empty State ---- */
 .empty-state { color: #484f58; text-align: center; padding: 40px 20px; font-size: 14px; }
 
@@ -188,10 +200,12 @@ kbd { background: #21262d; border: 1px solid #30363d; border-radius: 3px; paddin
 
 <div class="split-view" id="splitView" style="display:none;">
   <div class="panel panel-left">
+    <div class="breadcrumb" id="breadcrumbLeft"><span class="bc-root">root</span></div>
     <h2 id="panelLeftTitle">Left</h2>
     <div id="viewLeft"></div>
   </div>
   <div class="panel panel-right">
+    <div class="breadcrumb" id="breadcrumbRight"><span class="bc-root">root</span></div>
     <h2 id="panelRightTitle">Right</h2>
     <div id="viewRight"></div>
   </div>
@@ -694,6 +708,12 @@ function refreshView() {
     renderFullTree(document.getElementById('viewLeft'), DATA_LEFT, DATA_RIGHT, 'left', filterExpr);
     renderFullTree(document.getElementById('viewRight'), DATA_LEFT, DATA_RIGHT, 'right', filterExpr);
   }
+
+  // Reset breadcrumbs after re-render
+  var bcL = document.getElementById('breadcrumbLeft');
+  var bcR = document.getElementById('breadcrumbRight');
+  if (bcL) bcL.innerHTML = '<span class="bc-root">root</span>';
+  if (bcR) bcR.innerHTML = '<span class="bc-root">root</span>';
 }
 
 // =====================================================================
@@ -754,6 +774,66 @@ document.addEventListener('DOMContentLoaded', function() {
   panelLeft.addEventListener('scroll', syncScroll(panelLeft, panelRight), { passive: true });
   panelRight.addEventListener('scroll', syncScroll(panelRight, panelLeft), { passive: true });
 
+  // Breadcrumb — shows current path hierarchy at top of each panel
+  var bcTimer = null;
+  function updateBreadcrumb(panel, bcId) {
+    var panelRect = panel.getBoundingClientRect();
+    var x = panelRect.left + panelRect.width / 2;
+    var y = panelRect.top + 40; // below sticky breadcrumb bar
+
+    // Find the actual rendered element at that point
+    var el = document.elementFromPoint(x, y);
+
+    // Walk up from that element to find the nearest .children[data-path]
+    var foundPath = '';
+    while (el && el !== panel && el !== document.body) {
+      if (el.classList && el.classList.contains('children') && !el.classList.contains('hidden')) {
+        var p = el.getAttribute('data-path');
+        if (p !== null && p !== undefined) {
+          foundPath = p;
+          break;
+        }
+      }
+      el = el.parentElement;
+    }
+
+    // Fallback: if we landed in the breadcrumb area, try a bit lower
+    if (foundPath === '' && y < panelRect.top + panelRect.height) {
+      y += 40;
+      if (y < panelRect.top + panelRect.height) {
+        el = document.elementFromPoint(x, y);
+        while (el && el !== panel && el !== document.body) {
+          if (el.classList && el.classList.contains('children') && !el.classList.contains('hidden')) {
+            var p2 = el.getAttribute('data-path');
+            if (p2 !== null && p2 !== undefined) { foundPath = p2; break; }
+          }
+          el = el.parentElement;
+        }
+      }
+    }
+
+    var segments = foundPath ? foundPath.split('/').filter(Boolean) : [];
+    var bc = document.getElementById(bcId);
+    if (!bc) return;
+    var html = '<span class="bc-root">root</span>';
+    for (var si = 0; si < segments.length; si++) {
+      html += '<span class="bc-sep"> › </span><span class="bc-seg">' + esc(segments[si]) + '</span>';
+    }
+    bc.innerHTML = html;
+  }
+
+  function scheduleBreadcrumb(panel, bcId) {
+    if (!bcTimer) {
+      bcTimer = requestAnimationFrame(function() {
+        bcTimer = null;
+        updateBreadcrumb(panel, bcId);
+      });
+    }
+  }
+
+  panelLeft.addEventListener('scroll', function() { scheduleBreadcrumb(panelLeft, 'breadcrumbLeft'); }, { passive: true });
+  panelRight.addEventListener('scroll', function() { scheduleBreadcrumb(panelRight, 'breadcrumbRight'); }, { passive: true });
+
   // Helper to compute depth from path string
   function pathDepth(path) {
     if (!path || path === '') return 0;
@@ -786,6 +866,9 @@ document.addEventListener('DOMContentLoaded', function() {
       if (!rootDiv || !rootDiv.parentElement) return;
       expandRecursive(rootDiv, '', rootKey === 'left:' ? 'left' : 'right');
     });
+    // Update breadcrumb after expand
+    scheduleBreadcrumb(panelLeft, 'breadcrumbLeft');
+    scheduleBreadcrumb(panelRight, 'breadcrumbRight');
   }
 
   // Collapse All — hide child containers without destroying DOM
@@ -797,6 +880,9 @@ document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('.toggle-icon').forEach(function(el) {
       el.textContent = '\u25B6';
     });
+    // Reset breadcrumbs
+    document.getElementById('breadcrumbLeft').innerHTML = '<span class="bc-root">root</span>';
+    document.getElementById('breadcrumbRight').innerHTML = '<span class="bc-root">root</span>';
   }
   document.getElementById('expandAllBtn').addEventListener('click', expandAll);
   document.getElementById('collapseAllBtn').addEventListener('click', collapseAll);
