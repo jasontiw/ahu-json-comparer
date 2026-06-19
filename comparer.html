@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>JCI JSON Comparer</title>
+<title>AHU JSON Comparer</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0d1117; color: #e6edf3; padding: 16px; min-height: 100vh; }
@@ -128,8 +128,7 @@ kbd { background: #21262d; border: 1px solid #30363d; border-radius: 3px; paddin
 
 /* ---- Breadcrumb ---- */
 .breadcrumb { position: sticky; top: 0; z-index: 20; background: #0d1117; padding: 3px 12px; font-size: 11px; font-family: 'Cascadia Code','JetBrains Mono','Consolas',monospace; border-bottom: 1px solid #30363d; min-height: 20px; display: flex; align-items: center; gap: 1px; overflow-x: auto; white-space: nowrap; }
-.breadcrumb::-webkit-scrollbar { height: 2px; }
-.breadcrumb::-webkit-scrollbar-thumb { background: #30363d; border-radius: 2px; }
+
 .bc-root { color: #8b949e; flex-shrink: 0; }
 .bc-sep { color: #484f58; flex-shrink: 0; padding: 0 2px; }
 .bc-seg { color: #58a6ff; cursor: default; flex-shrink: 0; white-space: nowrap; }
@@ -148,6 +147,21 @@ kbd { background: #21262d; border: 1px solid #30363d; border-radius: 3px; paddin
   .panel-right { border-radius: 6px; }
   .toolbar input[type="text"] { width: 160px; }
 }
+
+/* ---- Dark Scrollbars ---- */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: #161b22; }
+::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #484f58; }
+
+.panel::-webkit-scrollbar { width: 6px; }
+.panel::-webkit-scrollbar-track { background: #0d1117; }
+.panel::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+.panel::-webkit-scrollbar-thumb:hover { background: #484f58; }
+
+.breadcrumb::-webkit-scrollbar { height: 3px; }
+.breadcrumb::-webkit-scrollbar-track { background: transparent; }
+.breadcrumb::-webkit-scrollbar-thumb { background: #30363d; border-radius: 2px; }
 </style>
 <script>
 /**
@@ -159,7 +173,7 @@ kbd { background: #21262d; border: 1px solid #30363d; border-radius: 3px; paddin
 <body>
 
 <div class="header">
-  <h1>JCI JSON Comparer</h1>
+  <h1>AHU JSON Comparer</h1>
   <div class="stats" id="statsBar"></div>
 </div>
 
