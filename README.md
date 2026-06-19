@@ -1,26 +1,26 @@
 # JCI JSON Comparer
 
-Herramienta CLI para comparar semánticamente dos archivos JSON de modelos AHU (Air Handling Units) de Johnson Controls.
+A CLI tool for semantically comparing two AHU (Air Handling Unit) JSON model files from Johnson Controls.
 
-## El problema
+## The Problem
 
-Los archivos JSON de modelos AHU (~17K líneas) contienen cientos de GUIDs que **cambian en cada exportación**. Comparar por ID o por posición en arrays no funciona — la misma entidad lógica aparece con GUIDs diferentes y en orden distinto entre dos versiones.
+AHU model JSON files (~17K lines) contain hundreds of GUIDs that **change on every export**. Comparing by ID or array position doesn't work — the same logical entity appears with different GUIDs and in different order between versions.
 
-## La solución
+## The Solution
 
-**Matching semántico por business keys**: en lugar de comparar por GUID o índice, la herramienta:
+**Semantic matching by business keys**: instead of comparing by GUID or index, the tool:
 
-1. Empareja segmentos por `segmentType + segmentTypeSuffix`
-2. Dentro de cada lista, empareja items usando todas sus propiedades no-ID como **business key**
-3. Compara recursivamente hasta el último nivel de anidación
-4. Ignora campos volátiles (`id`, `$type`, `*_ID`)
+1. Matches segments by `segmentType + segmentTypeSuffix`
+2. Inside each list, matches items using all non-ID properties as a **business key**
+3. Recursively compares down to the deepest nesting level
+4. Ignores volatile fields (`id`, `$type`, `*_ID`)
 
-### Reorganización estructural (--reorganize)
+### Structural Reorganization (--reorganize)
 
-Los JSON AHU tienen listas planas como `openingList` (27 items) y `bulkheadList` (8 items) que references a segmentos via `associatedUISegmentID`. Con `--reorganize`, la herramienta reordena el JSON antes de comparar, anidando cada lista bajo su segmento correspondiente:
+AHU JSON files have flat lists like `openingList` (27 items) and `bulkheadList` (8 items) that reference segments via `associatedUISegmentID`. With `--reorganize`, the tool restructures the JSON before comparing, nesting each list under its corresponding segment:
 
 ```
-Antes:                          Después:
+Before:                         After:
 unit/                           unit/
 ├── segmentList[15]             ├── segmentList[15]/
 ├── openingList[27]             │   └── IP-1/
@@ -28,81 +28,81 @@ unit/                           unit/
 ├── coilPanelList[2]            │       ├── bulkheads[1]
 ├── airPathList[2]              │       ├── coilPanels[...]
 ├── cabinetList[2]              │       └── relatedReferences[...]
-├── ...                          ├── airPathList[2]    ← multi-segment, queda top-level
+├── ...                          ├── airPathList[2]    ← multi-segment, stays top-level
                                 └── ...
 ```
 
-Esto hace que el diff muestre cambios como `unit.segmentList[match:IP/0].openings[added:...]` en lugar de `unit.openingList[match:...]`, dando contexto estructural inmediato.
+This makes diffs show changes like `unit.segmentList[match:IP/0].openings[added:...]` instead of `unit.openingList[match:...]`, providing immediate structural context.
 
 ## Stack
 
-- **Python 3.10+** — cero dependencias externas (solo stdlib)
-- **pytest** — tests unitarios y de integración
-- **ruff** — linter y formateador
+- **Python 3.10+** — zero external dependencies (stdlib only)
+- **pytest** — unit and integration tests
+- **ruff** — linter and formatter
 
-## Instalación
+## Installation
 
 ```bash
 pip install pytest ruff
 ```
 
-No requiere instalar el proyecto — se ejecuta directo.
+No project install required — runs directly from the repo root.
 
-## Uso
+## Usage
 
-### Pipeline completo (un solo comando)
+### Full Pipeline (single command)
 
 ```bash
-# Todo en uno: reorganiza -> diff.json -> diff.html
+# All-in-one: reorganize -> diff.json -> diff.html
 python run_diff.py
 
-# Sin reorganizar
+# Without reorganization
 python run_diff.py --no-reorganize
 
-# Con archivos custom
-python run_diff.py mi_archivo1.json mi_archivo2.json
+# With custom files
+python run_diff.py file1.json file2.json
 ```
 
-### CLI directa — diff JSON
+### Direct CLI — JSON diff
 
 ```bash
-# Output con formato legible
-python -m src.cli archivo1.json archivo2.json --pretty
+# Pretty-printed output
+python -m src.cli file1.json file2.json --pretty
 
-# Reorganizar antes de comparar (anida openings, bulkheads, etc. bajo cada segmento)
-python -m src.cli archivo1.json archivo2.json --reorganize --pretty
+# Reorganize before comparing (nests openings, bulkheads, etc. under each segment)
+python -m src.cli file1.json file2.json --reorganize --pretty
 
-# Reorganizar y además guardar los JSON reordenados como archivos _reorganized.json
-python -m src.cli archivo1.json archivo2.json --reorganize --output-reorganized
+# Reorganize and also save reorganized JSON files as _reorganized.json
+python -m src.cli file1.json file2.json --reorganize --output-reorganized
 ```
 
-| Flag | Descripción |
+| Flag | Description |
 |------|-------------|
-| `--pretty` / `-p` | Output indentado legible |
-| `--reorganize` / `-r` | Reordena el JSON anidando listas bajo sus segmentos antes de comparar |
-| `--output-reorganized` / `-o` | Guarda los JSON reordenados como `{nombre}_reorganized.json` (implica `--reorganize`) |
+| `--pretty` / `-p` | Human-readable indented output |
+| `--reorganize` / `-r` | Restructures JSON nesting lists under their segments before diffing |
+| `--output-reorganized` / `-o` | Saves reorganized JSONs as `{name}_reorganized.json` (implies `--reorganize`) |
 
-### HTML Report — análisis visual
+### HTML Report — visual analysis
 
 ```bash
 python generate_report.py diff.json
-# Genera diff.html — abrir en el navegador
+# Generates diff.html — open in browser
 ```
 
-## Reporte HTML
+## HTML Report
 
-El reporte `diff.html` es un árbol interactivo con:
+The `diff.html` report is an interactive tree with:
 
-- **Código de colores**: amarillo (cambiado), verde (agregado), rojo (eliminado)
-- **Filtro por búsqueda** en paths
-- **Toggle "Solo cambios"** para ocultar nodos unchanged
-- **Expandir/Colapsar todo**
-- **Contador de cambios** en el header
-- **Valores left/right** side-by-side con tachado para los cambiados
+- **Color coding**: yellow (changed), green (added), red (removed)
+- **Search filter** on paths
+- **"Changes only" toggle** to hide unchanged nodes
+- **Expand/Collapse all**
+- **Change counter** in the header
+- **Left/Right values** side-by-side with strikethrough for changed items
 
-## Estructura del diff JSON
+## Diff JSON Structure
 
-Cada nodo:
+Each node:
 
 ```json
 {
@@ -115,16 +115,16 @@ Cada nodo:
 }
 ```
 
-| Campo | Descripción |
+| Field | Description |
 |---|---|
-| `path` | Ruta JSON al nodo (notación `$` estilo JMESPath) |
-| `type` | Tipo del valor (`object`, `array`, `string`, `integer`, `number`, `boolean`) |
+| `path` | JSON path to the node (`$` JMESPath-style notation) |
+| `type` | Value type (`object`, `array`, `string`, `integer`, `number`, `boolean`) |
 | `status` | `unchanged`, `changed`, `added`, `removed` |
-| `has_changes` | `true` si el nodo o algún hijo tiene cambios |
-| `left` | Valor en el **primer archivo** (el "original" / baseline) — solo en `changed`, `removed` |
-| `right` | Valor en el **segundo archivo** (el "nuevo" / variante) — solo en `changed`, `added` |
-| `value` | Valor único (solo `added` / `removed`) |
-| `children` | Hijos del nodo (solo `object` y `array`) |
+| `has_changes` | `true` if the node or any child has changes |
+| `left` | Value from the **first file** (original / baseline) — only on `changed`, `removed` |
+| `right` | Value from the **second file** (new / variant) — only on `changed`, `added` |
+| `value` | Single value (only on `added`, `removed`) |
+| `children` | Child nodes (only on `object` and `array`) |
 
 ## Tests
 
@@ -132,34 +132,34 @@ Cada nodo:
 python -m pytest tests/ -v
 ```
 
-Incluye tests unitarios (`test_matcher.py`, `test_differ.py`, `test_reorganizer.py`) y de integración contra los archivos reales (`test_integration.py`).
+Includes unit tests (`test_matcher.py`, `test_differ.py`, `test_reorganizer.py`) and integration tests against real files (`test_integration.py`).
 
-## Proyecto
+## Project Structure
 
 ```
 jci-json-comparer/
 ├── src/
 │   ├── __init__.py
 │   ├── cli.py          # Entry point
-│   ├── types.py        # DiffNode, DiffStatus, utilidades
-│   ├── loader.py       # Carga de JSON (utf-8 / cp1252)
-│   ├── reorganizer.py  # Reordenamiento: anida listas bajo segmentos
-│   ├── matcher.py      # Matching semántico por business keys
-│   └── differ.py       # Comparación recursiva
+│   ├── types.py        # DiffNode, DiffStatus, utilities
+│   ├── loader.py       # JSON loading (utf-8 / cp1252)
+│   ├── reorganizer.py  # Reorganization: nest lists under segments
+│   ├── matcher.py      # Semantic matching by business keys
+│   └── differ.py       # Recursive comparison
 ├── tests/
 │   ├── __init__.py
 │   ├── test_matcher.py
 │   ├── test_differ.py
 │   ├── test_reorganizer.py
 │   └── test_integration.py
-├── generate_report.py  # Genera HTML visual desde diff.json
-├── run_diff.py         # Helper: ejecuta el comparador
+├── generate_report.py  # Generates HTML report from diff.json
+├── run_diff.py         # Helper: runs the comparer
 ├── pyproject.toml
 ├── .gitignore
 └── README.md
 ```
 
-## Arquitectura
+## Architecture
 
 ```
 ┌──────────┐    ┌──────────────┐    ┌──────────┐    ┌──────────┐
@@ -168,12 +168,12 @@ jci-json-comparer/
 └──────────┘    └──────────────┘    └──────────┘    └──────────┘
 ```
 
-Cuatro capas independientes:
-- **Loader**: carga y parsea los JSON
-- **Reorganizer**: [opcional] reordena el JSON anidando listas bajo sus segmentos (solo con `--reorganize`)
-- **Matcher**: empareja segmentos por `segmentType + segmentTypeSuffix` e items de listas por business keys
-- **Differ**: recorre y compara recursivamente produciendo un árbol `DiffNode`
+Four independent layers:
+- **Loader**: loads and parses the JSON files
+- **Reorganizer**: [optional] restructures JSON nesting lists under their segments (only with `--reorganize`)
+- **Matcher**: pairs segments by `segmentType + segmentTypeSuffix` and list items by business keys
+- **Differ**: traverses and compares recursively, producing a `DiffNode` tree
 
-## Licencia
+## License
 
-Uso interno.
+Internal use.
