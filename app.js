@@ -24,6 +24,7 @@ let filterTimer = null;           // debounce handle for filter input
 let DATA_LEFT_RAW = null;
 let DATA_RIGHT_RAW = null;
 let reorganizeEnabled = true;
+let sortByXEnabled = true;
 let EXCLUDED_FIELDS = new Set();
 
 // JMESPath result cache — lazyExpandChildren resolves against these when active
@@ -164,6 +165,15 @@ function reorganize(data) {
 
   if (Object.keys(unmatched).length > 0) {
     resultUnit._unmatched = unmatched;
+  }
+
+  // Sort segmentList by geometry.x ascending (segments without geometry.x go last)
+  if (sortByXEnabled && Array.isArray(resultUnit.segmentList)) {
+    resultUnit.segmentList.sort(function(a, b) {
+      var ax = a.geometry && a.geometry.x != null ? a.geometry.x : Infinity;
+      var bx = b.geometry && b.geometry.x != null ? b.geometry.x : Infinity;
+      return ax - bx;
+    });
   }
 
   return result;
@@ -683,8 +693,12 @@ function refreshView() {
     renderFullTree(document.getElementById('viewRight'), DATA_LEFT, DATA_RIGHT, 'right', filterExpr);
   }
 
-  // Rebuild change index for navigation
-  buildChangeIndex(DATA_LEFT, DATA_RIGHT);
+  // Rebuild change index for navigation (use JMESPath results when active)
+  if (JMESPATH_ACTIVE) {
+    buildChangeIndex(JMESPATH_LEFT, JMESPATH_RIGHT);
+  } else {
+    buildChangeIndex(DATA_LEFT, DATA_RIGHT);
+  }
 
   // Reset breadcrumbs after re-render
   var bcL = document.getElementById('breadcrumbLeft');
@@ -788,15 +802,36 @@ document.addEventListener('DOMContentLoaded', function() {
   });
   // Toolbar — JMESPath (on Enter only, not live — query can be expensive)
   document.getElementById('mapInput').addEventListener('keydown', function(e) {
-    if (e.key === 'Enter') refreshView();
-    if (e.key === 'Escape') { this.value = ''; refreshView(); }
+    if (e.key === 'Enter') {
+      try { localStorage.setItem('jci-jmespath-expr', this.value); } catch(ex) {}
+      refreshView();
+    }
+    if (e.key === 'Escape') {
+      this.value = '';
+      try { localStorage.setItem('jci-jmespath-expr', ''); } catch(ex) {}
+      refreshView();
+    }
   });
   document.getElementById('filterBtn').addEventListener('click', refreshView);
-  document.getElementById('mapBtn').addEventListener('click', refreshView);
+  document.getElementById('mapBtn').addEventListener('click', function() {
+    var val = document.getElementById('mapInput').value;
+    try { localStorage.setItem('jci-jmespath-expr', val); } catch(ex) {}
+    refreshView();
+  });
+
+  // Restore saved JMESPath expression
+  try {
+    var savedExpr = localStorage.getItem('jci-jmespath-expr');
+    if (savedExpr) {
+      document.getElementById('mapInput').value = savedExpr;
+    }
+  } catch(ex) {}
 
   // Reorganize toggle — force re-render by resetting dedup guards
   document.getElementById('reorganizeToggle').addEventListener('change', function() {
     reorganizeEnabled = this.checked;
+    // Enable/disable sort toggle visually
+    document.getElementById('sortByXToggle').disabled = !reorganizeEnabled;
     if (!DATA_LEFT_RAW) return;
     DATA_LEFT = reorganizeEnabled
       ? reorganize(JSON.parse(JSON.stringify(DATA_LEFT_RAW)))
@@ -809,6 +844,29 @@ document.addEventListener('DOMContentLoaded', function() {
     currentMap = null;
     refreshView();
   });
+
+  // Sort by X toggle — re-run reorganize to re-sort
+  document.getElementById('sortByXToggle').addEventListener('change', function() {
+    sortByXEnabled = this.checked;
+    try { localStorage.setItem('jci-sort-by-x', sortByXEnabled); } catch(e) {}
+    if (!DATA_LEFT_RAW || !reorganizeEnabled) return;
+    DATA_LEFT = reorganize(JSON.parse(JSON.stringify(DATA_LEFT_RAW)));
+    DATA_RIGHT = reorganize(JSON.parse(JSON.stringify(DATA_RIGHT_RAW)));
+    CACHED_STATS = computeStats(DATA_LEFT, DATA_RIGHT);
+    currentFilter = null;
+    currentMap = null;
+    refreshView();
+  });
+
+  // Init sort toggle from localStorage
+  try {
+    var savedSort = localStorage.getItem('jci-sort-by-x');
+    if (savedSort !== null) {
+      sortByXEnabled = savedSort === 'true';
+      document.getElementById('sortByXToggle').checked = sortByXEnabled;
+    }
+  } catch(e) {}
+  document.getElementById('sortByXToggle').disabled = !document.getElementById('reorganizeToggle').checked;
 
   // Exclude fields — debounced re-render with localStorage persistence
   var EXCLUDE_STORAGE_KEY = 'jci-exclude-fields';
@@ -1189,7 +1247,7 @@ function openHelp(topic) {
       + '<div class="help-example"><code>unit.segmentList[*].segmentType</code><span>All segment types as a flat array</span></div>'
       + '<div class="help-example"><code>unit.segmentList[*].weight</code><span>All weights as a flat array</span></div>'
       + '<h4>Reshape objects (like .map() returning objects)</h4>'
-      + '<div class="help-example"><code>unit.segmentList[*].{id: id, type: segmentType, weight: weight}</code><span>New objects with only id, type, weight</span></div>'
+      + '<div class="help-example"><code>unit.segmentList[*].{segmentType: segmentType, coreLength: coreLength,geometry: geometry}</code><span>New objects with only segmentType, coreLength, geometry</span></div>'
       + '<div class="help-example"><code>unit.segmentList[*].{segId: segmentIP_ID, x: geometry.x, y: geometry.y}</code><span>Coordinates + ID from nested objects</span></div>'
       + '<div class="help-example"><code>unit.segmentList[*].[segmentType, weight]</code><span>Array of pairs like [["IP",858], ...]</span></div>'
       + '<h4>Filter items (like .filter())</h4>'

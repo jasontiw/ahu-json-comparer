@@ -45,6 +45,10 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0d1117; colo
 .toolbar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; align-items: center; background: #161b22; padding: 10px 14px; border-radius: 8px; border: 1px solid #30363d; }
 .toolbar-group { display: flex; align-items: center; gap: 6px; }
 .toolbar label { font-size: 12px; color: #8b949e; font-weight: 500; white-space: nowrap; }
+.sort-option { margin-left: 16px; font-size: 11px !important; color: #6e7681 !important; }
+.sort-option input { margin-right: 3px; }
+.sort-option input:disabled { opacity: 0.4; }
+.sort-option:has(input:disabled) { opacity: 0.5; pointer-events: none; }
 .toolbar input[type="text"] { padding: 5px 10px; border-radius: 6px; border: 1px solid #30363d; background: #0d1117; color: #e6edf3; font-size: 13px; font-family: 'Cascadia Code', 'JetBrains Mono', 'Consolas', monospace; outline: none; width: 280px; }
 .toolbar input[type="text"]:focus { border-color: #58a6ff; }
 .toolbar input[type="text"]::placeholder { color: #484f58; font-family: 'Segoe UI', system-ui, sans-serif; }
