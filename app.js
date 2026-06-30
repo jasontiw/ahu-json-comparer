@@ -26,6 +26,11 @@ let DATA_RIGHT_RAW = null;
 let reorganizeEnabled = true;
 let EXCLUDED_FIELDS = new Set();
 
+// JMESPath result cache — lazyExpandChildren resolves against these when active
+let JMESPATH_LEFT = null;
+let JMESPATH_RIGHT = null;
+let JMESPATH_ACTIVE = false;
+
 // =====================================================================
 //  REORGANIZER — ported from Python comparer
 // =====================================================================
@@ -176,6 +181,7 @@ function tryFetch(url) {
 }
 
 function onDataLoaded() {
+  JMESPATH_ACTIVE = false;
   DATA_LEFT_RAW = JSON.parse(JSON.stringify(DATA_LEFT));
   DATA_RIGHT_RAW = JSON.parse(JSON.stringify(DATA_RIGHT));
   if (reorganizeEnabled) {
@@ -217,7 +223,7 @@ function isExcludedField(key) {
   for (var pi = 0; pi < patterns.length; pi++) {
     var pattern = patterns[pi];
     if (pattern.indexOf('*') !== -1) {
-      var re = new RegExp('^' + pattern.replace(/\*/g, '.*').replace(/[.+^${}()|[\]\\]/g, '\\$&') + '$');
+      var re = new RegExp('^' + pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$');
       if (re.test(key)) return true;
     }
   }
@@ -342,8 +348,10 @@ function computeFilterKey(desc, filterLower) {
 
 function lazyExpandChildren(childrenDiv, desc) {
   const side = desc.side;
-  const data = resolvePath(side === 'left' ? DATA_LEFT : DATA_RIGHT, desc.path);
-  const otherData = resolvePath(side === 'left' ? DATA_RIGHT : DATA_LEFT, desc.path);
+  const leftSource = JMESPATH_ACTIVE ? JMESPATH_LEFT : DATA_LEFT;
+  const rightSource = JMESPATH_ACTIVE ? JMESPATH_RIGHT : DATA_RIGHT;
+  const data = resolvePath(side === 'left' ? leftSource : rightSource, desc.path);
+  const otherData = resolvePath(side === 'left' ? rightSource : leftSource, desc.path);
 
   if (data === null || data === undefined || typeof data !== 'object') return;
 
@@ -424,6 +432,7 @@ function renderValueNode(desc) {
   if ((val === undefined || val === null) && otherVal !== undefined && otherVal !== null) {
     var div = document.createElement('div');
     div.className = 'tree-node';
+    if (desc.path) div.setAttribute('data-path', desc.path);
     var row = document.createElement('div');
     row.className = 'node-row';
     row.style.paddingLeft = (desc.depth * 18 + 6) + 'px';
@@ -443,6 +452,7 @@ function renderValueNode(desc) {
 
   var div = document.createElement('div');
   div.className = 'tree-node';
+  if (desc.path) div.setAttribute('data-path', desc.path);
 
   if (isBranch && hasChildren) {
     // Branch node — create row with toggle + empty childrenDiv (lazy)
@@ -611,6 +621,10 @@ function renderJmesPathResult(expression, filterText) {
     + '<span class="stat stat-removed">Removed: ' + stats.removed + '</span>'
     + '<span class="stat stat-same">Same: ' + stats.same + '</span>';
 
+  JMESPATH_LEFT = leftResult;
+  JMESPATH_RIGHT = rightResult;
+  JMESPATH_ACTIVE = true;
+
   renderFullTree(document.getElementById('viewLeft'), leftResult, rightResult, 'left', filterText, expression);
   renderFullTree(document.getElementById('viewRight'), leftResult, rightResult, 'right', filterText, expression);
 }
@@ -655,6 +669,7 @@ function refreshView() {
     // JMESPath mode: show query result in the tree
     renderJmesPathResult(mapExpr, filterExpr);
   } else {
+    JMESPATH_ACTIVE = false;
     // Full JSON tree mode — use cached stats (computed once in onDataLoaded)
     var stats = CACHED_STATS || computeStats(DATA_LEFT, DATA_RIGHT);
     document.getElementById('statsBar').innerHTML =
@@ -1045,6 +1060,15 @@ function buildChangeIndex(leftData, rightData) {
   }
 
   walk(leftData, rightData, '', '');
+
+  // Sort shallow paths first so top-level changes appear before deeply nested ones
+  CHANGE_INDEX.sort(function(a, b) {
+    var depthA = a.path.split('/').filter(Boolean).length;
+    var depthB = b.path.split('/').filter(Boolean).length;
+    if (depthA !== depthB) return depthA - depthB;
+    return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
+  });
+
   updateChangeCounter();
 }
 
@@ -1072,31 +1096,14 @@ function expandPathToNode(side, path) {
 }
 
 function findNodeElement(side, path) {
-  var parts = path.split('/').filter(Boolean);
-  if (parts.length === 0) return null;
-  var keyName = parts[parts.length - 1];
-  var parentSegments = parts.slice(0, -1);
-  var parentPath = parentSegments.length > 0 ? '/' + parentSegments.join('/') : '';
-
-  var container;
-  if (parentPath) {
-    var parentChildren = NODE_MAP.get(side + ':' + parentPath);
-    if (!parentChildren) return null;
-    container = parentChildren;
-  } else {
-    container = side === 'left' ? document.getElementById('viewLeft') : document.getElementById('viewRight');
-  }
+  if (!path) return null;
+  // Escape CSS selector special characters in the path value
+  var safePath = path.replace(/"/g, '\\"').replace(/'/g, '\\\'');
+  var container = side === 'left' ? document.getElementById('viewLeft') : document.getElementById('viewRight');
   if (!container) return null;
-
-  var children = container.children;
-  for (var ci = 0; ci < children.length; ci++) {
-    var tn = children[ci];
-    if (!tn.classList || !tn.classList.contains('tree-node')) continue;
-    var ks = tn.querySelector('.node-key');
-    if (ks && ks.textContent === keyName) {
-      return tn.querySelector('.node-row') || tn;
-    }
-  }
+  // Use data-path attribute (set on .tree-node in renderValueNode) for direct lookup
+  var tn = container.querySelector('.tree-node[data-path="' + safePath + '"]');
+  if (tn) return tn.querySelector('.node-row') || tn;
   return null;
 }
 
