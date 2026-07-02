@@ -43,13 +43,13 @@
 <!-- Toolbar (hidden until data loaded) -->
 <div class="toolbar" id="toolbar" style="display:none;">
   <div class="toolbar-group">
-    <label>Search: <span class="help-btn" onclick="openHelp('filter')" title="How to use Search">&#9432;</span></label>
+    <label>Search: <span class="help-btn" data-topic="filter" title="How to use Search">&#9432;</span></label>
     <input type="text" id="filterInput" placeholder='e.g. weight, IP, segmentType' spellcheck="false">
     <button id="filterBtn">Apply</button>
   </div>
   <div class="toolbar-sep"></div>
   <div class="toolbar-group">
-    <label>JMESPath: <span class="help-btn" onclick="openHelp('jmespath')" title="How to use JMESPath">&#9432;</span></label>
+    <label>JMESPath: <span class="help-btn" data-topic="jmespath" title="How to use JMESPath">&#9432;</span></label>
     <input type="text" id="mapInput" placeholder='e.g. unit.segmentList[*].segmentType' spellcheck="false">
     <button id="mapBtn">Query</button>
   </div>
@@ -66,7 +66,7 @@
   </div>
   <div class="toolbar-sep"></div>
   <div class="toolbar-group">
-    <label>Skip fields: <span class="help-btn" onclick="openHelp('skip')" title="How to exclude fields">&#9432;</span></label>
+    <label>Skip fields: <span class="help-btn" data-topic="skip" title="How to exclude fields">&#9432;</span></label>
     <input type="text" id="excludeInput" placeholder='e.g. id, $type, *_ID' spellcheck="false" class="exclude-input">
   </div>
   <div class="toolbar-sep"></div>
@@ -101,11 +101,11 @@
 
 
 <!-- HELP MODAL -->
-<div class="help-overlay" id="helpOverlay" onclick="closeHelp()">
-  <div class="help-modal" onclick="event.stopPropagation()">
+<div class="help-overlay" id="helpOverlay">
+  <div class="help-modal">
     <div class="help-modal-header">
       <span id="helpModalTitle">Help</span>
-      <span class="help-modal-close" onclick="closeHelp()">&times;</span>
+      <span class="help-modal-close">&times;</span>
     </div>
     <div class="help-modal-body" id="helpModalBody">
     </div>
@@ -113,6 +113,6 @@
 </div>
 
 
-  <script src="app.js"></script>
+  <script type="module" src="src/main.js"></script>
 </body>
 </html>
