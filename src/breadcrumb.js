@@ -6,6 +6,9 @@
 
 import { esc } from './utils.js';
 
+let lastBcUpdate = 0;
+const BC_THROTTLE_MS = 100;
+
 export function initBreadcrumb() {
   const panelLeft = document.querySelector('.panel-left');
   const panelRight = document.querySelector('.panel-right');
@@ -76,6 +79,9 @@ export function initBreadcrumb() {
   }
 
   function scheduleBreadcrumb(panel, bcId) {
+    const now = Date.now();
+    if (now - lastBcUpdate < BC_THROTTLE_MS) return;
+    lastBcUpdate = now;
     if (!bcTimer) {
       bcTimer = requestAnimationFrame(function () {
         bcTimer = null;

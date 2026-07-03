@@ -24,6 +24,9 @@ export const state = {
   JMESPATH_RIGHT: null,
   JMESPATH_ACTIVE: false,
 
+  // Expand/collapse guards
+  isExpanding: false,
+
   // Dedup guards
   currentFilter: null,
   currentMap: null,

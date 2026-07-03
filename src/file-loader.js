@@ -44,6 +44,8 @@ export function setSideData(side, data, filename) {
 
 export function onDataLoaded() {
   state.JMESPATH_ACTIVE = false;
+  state.currentFilter = null;
+  state.currentMap = null;
   state.DATA_LEFT_RAW = JSON.parse(JSON.stringify(state.DATA_LEFT));
   state.DATA_RIGHT_RAW = JSON.parse(JSON.stringify(state.DATA_RIGHT));
   if (state.reorganizeEnabled) {

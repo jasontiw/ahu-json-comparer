@@ -589,49 +589,129 @@ export function refreshView() {
 // =========================================================================
 
 export function expandAll() {
-  function expandRecursive(container, path, side) {
-    if (container.children.length === 0) {
-      lazyExpandChildren(container, {
-        path,
-        depth: pathDepth(path),
-        side,
-      });
-    }
-    container.classList.remove('hidden');
-    const parentEl = container.parentElement;
-    if (parentEl) {
-      const toggle = parentEl.querySelector('.toggle-icon');
-      if (toggle) toggle.textContent = '\u25BC';
-    }
-    const childContainers = container.querySelectorAll(
-      ':scope > .tree-node > .children',
-    );
-    for (let ci = 0; ci < childContainers.length; ci++) {
-      const childPath = childContainers[ci].getAttribute('data-path');
-      if (childPath) {
-        expandRecursive(childContainers[ci], childPath, side);
-      }
-    }
-  }
+  // Prevent double-expand
+  if (state.isExpanding) return;
 
+  // First pass: expand roots on both sides to trigger first-level lazy loads
   ['left:', 'right:'].forEach(function (rootKey) {
     const rootDiv = state.NODE_MAP.get(rootKey);
     if (!rootDiv || !rootDiv.parentElement) return;
-    expandRecursive(rootDiv, '', rootKey === 'left:' ? 'left' : 'right');
+    if (rootDiv.children.length === 0) {
+      const side = rootKey === 'left:' ? 'left' : 'right';
+      lazyExpandChildren(rootDiv, { path: '', depth: 0, side: side });
+    }
+    rootDiv.classList.remove('hidden');
+    const toggle = rootDiv.parentElement.querySelector('.toggle-icon');
+    if (toggle) toggle.textContent = '\u25BC';
   });
 
-  // Notify breadcrumb after expand
-  const panelLeft = document.querySelector('.panel-left');
-  const panelRight = document.querySelector('.panel-right');
-  if (panelLeft) {
-    panelLeft.dispatchEvent(new Event('scroll'));
+  // Collect first-level children containers from both sides
+  const rootLeft = state.NODE_MAP.get('left:');
+  const rootRight = state.NODE_MAP.get('right:');
+  const queue = [];
+  function collect(container, side) {
+    const children = container.querySelectorAll(
+      ':scope > .tree-node > .children',
+    );
+    for (let ci = 0; ci < children.length; ci++) {
+      queue.push({ el: children[ci], side: side });
+    }
   }
-  if (panelRight) {
-    panelRight.dispatchEvent(new Event('scroll'));
+  if (rootLeft) collect(rootLeft, 'left');
+  if (rootRight) collect(rootRight, 'right');
+
+  // Fast path: small tree — use synchronous recursion (same as before)
+  if (queue.length < 500) {
+    function expandRecursive(container, path, side) {
+      if (container.children.length === 0) {
+        lazyExpandChildren(container, {
+          path,
+          depth: pathDepth(path),
+          side,
+        });
+      }
+      container.classList.remove('hidden');
+      const parentEl = container.parentElement;
+      if (parentEl) {
+        const toggle = parentEl.querySelector('.toggle-icon');
+        if (toggle) toggle.textContent = '\u25BC';
+      }
+      const childContainers = container.querySelectorAll(
+        ':scope > .tree-node > .children',
+      );
+      for (let ci = 0; ci < childContainers.length; ci++) {
+        const childPath = childContainers[ci].getAttribute('data-path');
+        if (childPath) {
+          expandRecursive(childContainers[ci], childPath, side);
+        }
+      }
+    }
+    ['left:', 'right:'].forEach(function (rootKey) {
+      const rootDiv = state.NODE_MAP.get(rootKey);
+      if (!rootDiv || !rootDiv.parentElement) return;
+      expandRecursive(rootDiv, '', rootKey === 'left:' ? 'left' : 'right');
+    });
+    dispatchScrollEvents();
+    return;
   }
+
+  // Incremental path for large trees
+  state.isExpanding = true;
+  showExpandingIndicator(true);
+
+  let idx = 0;
+  const BATCH_SIZE = 300;
+
+  function processBatch() {
+    if (!state.isExpanding) {
+      showExpandingIndicator(false);
+      return;
+    }
+    const end = Math.min(idx + BATCH_SIZE, queue.length);
+    while (idx < end) {
+      const item = queue[idx];
+      const childrenDiv = item.el;
+      const side = item.side;
+      const path = childrenDiv.getAttribute('data-path') || '';
+      if (childrenDiv.children.length === 0) {
+        lazyExpandChildren(childrenDiv, {
+          path,
+          depth: pathDepth(path),
+          side,
+        });
+      }
+      childrenDiv.classList.remove('hidden');
+      const parentEl = childrenDiv.parentElement;
+      if (parentEl) {
+        const toggle = parentEl.querySelector('.toggle-icon');
+        if (toggle) toggle.textContent = '\u25BC';
+      }
+      // Discover grandchildren → queue end (BFS so levels expand evenly)
+      const grandChildren = childrenDiv.querySelectorAll(
+        ':scope > .tree-node > .children',
+      );
+      for (let gi = 0; gi < grandChildren.length; gi++) {
+        queue.push({ el: grandChildren[gi], side: side });
+      }
+      idx++;
+    }
+    if (idx < queue.length) {
+      requestAnimationFrame(processBatch);
+    } else {
+      state.isExpanding = false;
+      showExpandingIndicator(false);
+      dispatchScrollEvents();
+    }
+  }
+
+  requestAnimationFrame(processBatch);
 }
 
 export function collapseAll() {
+  // Abort any in-flight incremental expansion
+  state.isExpanding = false;
+  showExpandingIndicator(false);
+
   state.NODE_MAP.forEach(function (cv) {
     cv.classList.add('hidden');
   });
@@ -642,6 +722,35 @@ export function collapseAll() {
   const bcR = document.getElementById('breadcrumbRight');
   if (bcL) bcL.innerHTML = '<span class="bc-root">root</span>';
   if (bcR) bcR.innerHTML = '<span class="bc-root">root</span>';
+}
+
+// =========================================================================
+//  Incremental expand helpers
+// =========================================================================
+
+let expandingIndicator = null;
+
+function showExpandingIndicator(show) {
+  const statsBar = document.getElementById('statsBar');
+  if (!statsBar) return;
+  if (show && !expandingIndicator) {
+    expandingIndicator = document.createElement('span');
+    expandingIndicator.className = 'stat in-progress';
+    expandingIndicator.textContent = 'Expanding\u2026';
+    statsBar.appendChild(expandingIndicator);
+  } else if (!show && expandingIndicator) {
+    if (expandingIndicator.parentNode) {
+      expandingIndicator.parentNode.removeChild(expandingIndicator);
+    }
+    expandingIndicator = null;
+  }
+}
+
+function dispatchScrollEvents() {
+  const panelLeft = document.querySelector('.panel-left');
+  const panelRight = document.querySelector('.panel-right');
+  if (panelLeft) panelLeft.dispatchEvent(new Event('scroll'));
+  if (panelRight) panelRight.dispatchEvent(new Event('scroll'));
 }
 
 // =========================================================================

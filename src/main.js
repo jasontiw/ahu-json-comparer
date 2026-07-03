@@ -31,6 +31,31 @@ import { serializeState, deserializeState } from './share-state.js';
 
 document.addEventListener('DOMContentLoaded', function () {
   // ===================================================================
+  //  Theme restore
+  // ===================================================================
+
+  function applyTheme(theme) {
+    document.documentElement.dataset.theme = theme;
+    const btn = document.getElementById('themeToggle');
+    if (btn) btn.textContent = theme === 'dark' ? '\u{1F319}' : '\u{2600}\u{FE0F}';
+  }
+
+  function initTheme() {
+    let theme = 'dark';
+    try { theme = localStorage.getItem('jci-theme') || 'dark'; } catch (e) { /* ignore */ }
+    applyTheme(theme);
+
+    document.getElementById('themeToggle').addEventListener('click', function () {
+      const current = document.documentElement.dataset.theme || 'dark';
+      const next = current === 'dark' ? 'light' : 'dark';
+      applyTheme(next);
+      try { localStorage.setItem('jci-theme', next); } catch (e) { /* ignore */ }
+    });
+  }
+
+  initTheme();
+
+  // ===================================================================
   //  Drop zones
   // ===================================================================
 
