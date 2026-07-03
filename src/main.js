@@ -27,6 +27,7 @@ import { openHelp, closeHelp } from './help-modal.js';
 import { initScrollSync } from './scroll-sync.js';
 import { initBreadcrumb } from './breadcrumb.js';
 import { initKeyboard } from './keyboard.js';
+import { serializeState, deserializeState } from './share-state.js';
 
 document.addEventListener('DOMContentLoaded', function () {
   // ===================================================================
@@ -248,6 +249,15 @@ document.addEventListener('DOMContentLoaded', function () {
     applyExclude(savedExclude);
   }
 
+  // ===================================================================
+  //  Hash state restore (overrides localStorage for shared links)
+  // ===================================================================
+
+  const hash = window.location.hash.slice(1);
+  if (hash) {
+    deserializeState(hash);
+  }
+
   document.getElementById('excludeInput').addEventListener('input', function () {
     clearTimeout(excludeTimer);
     const input = this;
@@ -284,6 +294,36 @@ document.addEventListener('DOMContentLoaded', function () {
 
   document.getElementById('expandAllBtn').addEventListener('click', expandAll);
   document.getElementById('collapseAllBtn').addEventListener('click', collapseAll);
+
+  // ===================================================================
+  //  Share link — Copy Link button
+  // ===================================================================
+
+  document.getElementById('shareLinkBtn').addEventListener('click', function () {
+    const hash = serializeState();
+    window.location.hash = hash;
+    const url = window.location.href;
+    navigator.clipboard.writeText(url).then(function () {
+      const btn = document.getElementById('shareLinkBtn');
+      const orig = btn.textContent;
+      btn.textContent = 'Copied!';
+      setTimeout(function () { btn.textContent = orig; }, 2000);
+    }).catch(function () {
+      // Fallback: execCommand
+      const ta = document.createElement('textarea');
+      ta.value = url;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      const btn = document.getElementById('shareLinkBtn');
+      const orig = btn.textContent;
+      btn.textContent = 'Copied!';
+      setTimeout(function () { btn.textContent = orig; }, 2000);
+    });
+  });
 
   // ===================================================================
   //  Change navigation
