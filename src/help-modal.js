@@ -30,6 +30,7 @@ export function openHelp(topic) {
       '<div class="help-example"><code class="help-insert" data-insert="skip">*_ID</code><span>Wildcard \u2014 any field ending in <code>_ID</code></span></div>' +
       '<div class="help-example"><code class="help-insert" data-insert="skip">createdDate, modifiedDate</code><span>Ignore timestamp fields</span></div>' +
       '<div class="help-example"><code class="help-insert" data-insert="skip">id, $type, createdOn, modifiedOn, ownerId</code><span>Common volatile fields for AHU models</span></div>' +
+      '<div class="help-example"><code class="help-insert" data-insert="skip">id, *ID, associatedOpeningID, itemId</code><span>Wildcard + specific ID fields for opening references</span></div>' +
       '<h4>Tips</h4>' +
       '<ul class="help-notes">' +
       '<li>The input updates automatically 300ms after you stop typing</li>' +
