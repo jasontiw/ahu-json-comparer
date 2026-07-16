@@ -188,9 +188,12 @@ document.addEventListener('DOMContentLoaded', function () {
 
   let justOpened = false;
 
+  const jmespathGroup = mapInput.parentElement;
+
   function openEditor() {
     jmespathEditorInput.value = jmespathRealValue;
     jmespathEditor.style.display = 'block';
+    jmespathGroup.classList.add('editor-open');
     justOpened = true;
     setTimeout(function () { justOpened = false; }, 250);
     setTimeout(function () { jmespathEditorInput.focus(); }, 50);
@@ -200,6 +203,16 @@ document.addEventListener('DOMContentLoaded', function () {
     jmespathRealValue = jmespathEditorInput.value;
     setToolbarDisplay(jmespathRealValue);
     jmespathEditor.style.display = 'none';
+    jmespathGroup.classList.remove('editor-open');
+  }
+
+  function closeEditorAndRun() {
+    jmespathRealValue = jmespathEditorInput.value;
+    try { localStorage.setItem('jci-jmespath-expr', jmespathRealValue); } catch (ex) { /* ignore */ }
+    setToolbarDisplay(jmespathRealValue);
+    jmespathEditor.style.display = 'none';
+    jmespathGroup.classList.remove('editor-open');
+    refreshView();
   }
 
   mapExpandBtn.addEventListener('click', function (e) {
@@ -219,11 +232,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
   jmespathEditorRun.addEventListener('click', function (e) {
     e.stopPropagation();
-    jmespathRealValue = jmespathEditorInput.value;
-    try { localStorage.setItem('jci-jmespath-expr', jmespathRealValue); } catch (ex) { /* ignore */ }
-    setToolbarDisplay(jmespathRealValue);
-    jmespathEditor.style.display = 'none';
-    refreshView();
+    closeEditorAndRun();
   });
 
   // Ctrl+Enter in panel editor runs the query

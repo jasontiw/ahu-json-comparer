@@ -222,6 +222,13 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg-prim
 .toolbar button:active, .tb-btn:active { background: var(--text-placeholder); }
 .toolbar-sep { width: 1px; height: 28px; background: var(--border-primary); margin: 0 4px; }
 
+/* Hide toolbar JMESPath input/buttons when editor panel is open */
+.toolbar-group.editor-open #mapInput,
+.toolbar-group.editor-open #mapBtn,
+.toolbar-group.editor-open #mapExpandBtn {
+  display: none;
+}
+
 /* ---- JMESPath Expandable Editor ---- */
 .jmespath-editor {
   background: var(--bg-secondary);
