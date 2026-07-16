@@ -5,6 +5,7 @@
  */
 
 import { state } from './state.js';
+import jmespath from 'jmespath';
 
 // ---------------------------------------------------------------------------
 //  Constants
@@ -162,13 +163,21 @@ export function reorganize(data) {
     resultUnit._unmatched = unmatched;
   }
 
-  // Sort segmentList by geometry.x ascending
+  // Sort segmentList by segmentTypeSuffix then geometry.x (JMESPath sort_by)
   if (state.sortByXEnabled && Array.isArray(resultUnit.segmentList)) {
-    resultUnit.segmentList.sort(function (a, b) {
-      const ax = a.geometry && a.geometry.x != null ? a.geometry.x : Infinity;
-      const bx = b.geometry && b.geometry.x != null ? b.geometry.x : Infinity;
-      return ax - bx;
-    });
+    try {
+      resultUnit.segmentList = jmespath.search(
+        { list: resultUnit.segmentList },
+        'list | sort_by(@, &segmentTypeSuffix) | sort_by(@, &geometry.x)',
+      );
+    } catch (e) {
+      // Fallback: plain sort by geometry.x only
+      resultUnit.segmentList.sort(function (a, b) {
+        const ax = a.geometry && a.geometry.x != null ? a.geometry.x : Infinity;
+        const bx = b.geometry && b.geometry.x != null ? b.geometry.x : Infinity;
+        return ax - bx;
+      });
+    }
   }
 
   return result;

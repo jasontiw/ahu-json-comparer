@@ -127,37 +127,123 @@ document.addEventListener('DOMContentLoaded', function () {
   document.getElementById('filterBtn').addEventListener('click', refreshView);
 
   // ===================================================================
-  //  JMESPath input (Enter to execute)
+  //  JMESPath toolbar textarea — auto-resize + newline-stripped display
   // ===================================================================
 
-  document.getElementById('mapInput').addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') {
-      try {
-        localStorage.setItem('jci-jmespath-expr', this.value);
-      } catch (ex) {
-        /* ignore */
-      }
+  const mapInput = document.getElementById('mapInput');
+
+  /** Preserved value with newlines — for the panel editor */
+  let jmespathRealValue = '';
+
+  function autoResize(el) {
+    el.style.height = 'auto';
+    el.style.height = Math.max(el.scrollHeight, 28) + 'px';
+  }
+
+  /** Set toolbar display (flat) + update real value */
+  function setToolbarDisplay(value) {
+    jmespathRealValue = value;
+    mapInput.value = value.replace(/\n/g, ' ');
+    autoResize(mapInput);
+  }
+
+  mapInput.addEventListener('input', function () {
+    // Strip any newlines typed/pasted in the toolbar — keep it compact
+    if (this.value.includes('\n')) {
+      this.value = this.value.replace(/\n/g, ' ');
+    }
+    jmespathRealValue = this.value;
+    autoResize(this);
+  });
+
+  mapInput.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      try { localStorage.setItem('jci-jmespath-expr', jmespathRealValue); } catch (ex) { /* ignore */ }
       refreshView();
     }
     if (e.key === 'Escape') {
       this.value = '';
-      try {
-        localStorage.setItem('jci-jmespath-expr', '');
-      } catch (ex) {
-        /* ignore */
-      }
+      jmespathRealValue = '';
+      this.style.height = 'auto';
+      try { localStorage.setItem('jci-jmespath-expr', ''); } catch (ex) { /* ignore */ }
       refreshView();
     }
   });
 
   document.getElementById('mapBtn').addEventListener('click', function () {
-    const val = document.getElementById('mapInput').value;
-    try {
-      localStorage.setItem('jci-jmespath-expr', val);
-    } catch (ex) {
-      /* ignore */
-    }
+    try { localStorage.setItem('jci-jmespath-expr', jmespathRealValue); } catch (ex) { /* ignore */ }
     refreshView();
+  });
+
+  // ===================================================================
+  //  JMESPath expandable editor panel
+  // ===================================================================
+
+  const mapExpandBtn = document.getElementById('mapExpandBtn');
+  const jmespathEditor = document.getElementById('jmespathEditor');
+  const jmespathEditorInput = document.getElementById('jmespathEditorInput');
+  const jmespathEditorClose = document.getElementById('jmespathEditorClose');
+  const jmespathEditorRun = document.getElementById('jmespathEditorRun');
+
+  let justOpened = false;
+
+  function openEditor() {
+    jmespathEditorInput.value = jmespathRealValue;
+    jmespathEditor.style.display = 'block';
+    justOpened = true;
+    setTimeout(function () { justOpened = false; }, 250);
+    setTimeout(function () { jmespathEditorInput.focus(); }, 50);
+  }
+
+  function closeEditor() {
+    jmespathRealValue = jmespathEditorInput.value;
+    setToolbarDisplay(jmespathRealValue);
+    jmespathEditor.style.display = 'none';
+  }
+
+  mapExpandBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    openEditor();
+  });
+
+  // Also open editor when toolbar textarea gets focus (for long expressions)
+  mapInput.addEventListener('focus', function () {
+    if (this.value.length > 80) openEditor();
+  });
+
+  jmespathEditorClose.addEventListener('click', function (e) {
+    e.stopPropagation();
+    closeEditor();
+  });
+
+  jmespathEditorRun.addEventListener('click', function (e) {
+    e.stopPropagation();
+    jmespathRealValue = jmespathEditorInput.value;
+    try { localStorage.setItem('jci-jmespath-expr', jmespathRealValue); } catch (ex) { /* ignore */ }
+    setToolbarDisplay(jmespathRealValue);
+    jmespathEditor.style.display = 'none';
+    refreshView();
+  });
+
+  // Ctrl+Enter in panel editor runs the query
+  jmespathEditorInput.addEventListener('keydown', function (e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      jmespathEditorRun.click();
+    }
+    if (e.key === 'Escape' && !e.shiftKey) {
+      closeEditor();
+    }
+  });
+
+  // Click outside the editor panel closes it (ignores clicks right after open)
+  document.addEventListener('click', function (e) {
+    if (jmespathEditor.style.display === 'none') return;
+    if (justOpened) return;
+    if (jmespathEditor.contains(e.target)) return;
+    if (mapExpandBtn.contains(e.target)) return;
+    closeEditor();
   });
 
   // ===================================================================
@@ -167,7 +253,8 @@ document.addEventListener('DOMContentLoaded', function () {
   try {
     const savedExpr = localStorage.getItem('jci-jmespath-expr');
     if (savedExpr) {
-      document.getElementById('mapInput').value = savedExpr;
+      jmespathRealValue = savedExpr;
+      setToolbarDisplay(savedExpr);
     }
   } catch (ex) {
     /* ignore */
@@ -373,8 +460,11 @@ document.addEventListener('DOMContentLoaded', function () {
     });
   });
 
-  // Close help on overlay click
-  document.getElementById('helpOverlay').addEventListener('click', closeHelp);
+  // Close help on overlay click (but not when clicking an insertable example)
+  document.getElementById('helpOverlay').addEventListener('click', function (e) {
+    if (e.target.closest('.help-insert')) return;
+    closeHelp();
+  });
 
   // Close help on × button
   document.querySelector('.help-modal-close').addEventListener('click', closeHelp);
@@ -382,6 +472,29 @@ document.addEventListener('DOMContentLoaded', function () {
   // Prevent overlay click from propagating through modal body
   document.querySelector('.help-modal').addEventListener('click', function (e) {
     e.stopPropagation();
+  });
+
+  // ===================================================================
+  //  Click help examples to insert into input (JMESPath / Skip fields)
+  // ===================================================================
+
+  document.getElementById('helpModalBody').addEventListener('click', function (e) {
+    const code = e.target.closest('.help-insert');
+    if (!code) return;
+    const value = code.textContent.trim();
+    const target = code.getAttribute('data-insert');
+
+    if (target === 'jmespath') {
+      setToolbarDisplay(value);
+      try { localStorage.setItem('jci-jmespath-expr', value); } catch (ex) { /* ignore */ }
+      closeHelp();
+      refreshView();
+    } else if (target === 'skip') {
+      const input = document.getElementById('excludeInput');
+      input.value = value;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      closeHelp();
+    }
   });
 
   // ===================================================================

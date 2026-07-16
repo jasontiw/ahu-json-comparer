@@ -54,8 +54,9 @@
   <div class="toolbar-sep"></div>
   <div class="toolbar-group">
     <label>JMESPath: <span class="help-btn" data-topic="jmespath" title="How to use JMESPath">&#9432;</span></label>
-    <input type="text" id="mapInput" placeholder='e.g. unit.segmentList[*].segmentType' spellcheck="false">
+    <textarea id="mapInput" rows="1" placeholder='e.g. unit.segmentList[*].segmentType' spellcheck="false"></textarea>
     <button id="mapBtn">Query</button>
+    <button id="mapExpandBtn" class="tb-btn" title="Expand editor">⤢</button>
   </div>
   <div class="toolbar-sep"></div>
   <div class="toolbar-group">
@@ -88,6 +89,18 @@
     <span id="changeCounter" class="change-counter">0 / 0</span>
     <button id="nextChangeBtn" class="tb-btn" title="Next change (N)">&#9660;</button>
   </div>
+</div>
+
+<!-- JMESPath expandable editor panel -->
+<div class="jmespath-editor" id="jmespathEditor" style="display:none;">
+  <div class="jmespath-editor-header">
+    <span class="jmespath-editor-title">JMESPath Editor</span>
+    <div class="jmespath-editor-actions">
+      <button id="jmespathEditorRun" class="tb-btn">Run (Ctrl+Enter)</button>
+      <button id="jmespathEditorClose" class="tb-btn" title="Close editor">✕</button>
+    </div>
+  </div>
+  <textarea id="jmespathEditorInput" spellcheck="false" placeholder="Enter JMESPath expression..."></textarea>
 </div>
 
 <div class="split-view" id="splitView" style="display:none;">
