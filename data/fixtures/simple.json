@@ -1,0 +1,14 @@
+{
+  "unit": {
+    "segmentList": [
+      { "id": "seg-A", "geometry": { "x": 100 }, "name": "Segment A" },
+      { "id": "seg-B", "geometry": { "x": 50 }, "name": "Segment B" }
+    ],
+    "openingList": [
+      { "id": "op-1", "associatedUISegmentID": "seg-A", "width": 600 }
+    ],
+    "bulkheadList": [
+      { "id": "bh-1", "associatedUISegmentID": "seg-B", "height": 300 }
+    ]
+  }
+}
