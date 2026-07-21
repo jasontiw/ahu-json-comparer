@@ -160,6 +160,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       try { localStorage.setItem('jci-jmespath-expr', jmespathRealValue); } catch (ex) { /* ignore */ }
+      saveQueryHistory(jmespathRealValue);
       refreshView();
     }
     if (e.key === 'Escape') {
@@ -173,6 +174,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
   document.getElementById('mapBtn').addEventListener('click', function () {
     try { localStorage.setItem('jci-jmespath-expr', jmespathRealValue); } catch (ex) { /* ignore */ }
+    saveQueryHistory(jmespathRealValue);
     refreshView();
   });
 
@@ -209,6 +211,7 @@ document.addEventListener('DOMContentLoaded', function () {
   function closeEditorAndRun() {
     jmespathRealValue = jmespathEditorInput.value;
     try { localStorage.setItem('jci-jmespath-expr', jmespathRealValue); } catch (ex) { /* ignore */ }
+    saveQueryHistory(jmespathRealValue);
     setToolbarDisplay(jmespathRealValue);
     jmespathEditor.style.display = 'none';
     jmespathGroup.classList.remove('editor-open');
@@ -253,6 +256,93 @@ document.addEventListener('DOMContentLoaded', function () {
     if (jmespathEditor.contains(e.target)) return;
     if (mapExpandBtn.contains(e.target)) return;
     closeEditor();
+  });
+
+  // ===================================================================
+  //  JMESPath Query History
+  // ===================================================================
+
+  const HISTORY_KEY = 'jci-jmespath-history';
+  const MAX_HISTORY = 20;
+
+  function loadQueryHistory() {
+    try {
+      const raw = localStorage.getItem(HISTORY_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function saveQueryHistory(query) {
+    const trimmed = query.trim();
+    if (!trimmed) return;
+    let history = loadQueryHistory();
+    history = history.filter(function (entry) { return entry.query !== trimmed; });
+    history.unshift({ query: trimmed, timestamp: Date.now() });
+    if (history.length > MAX_HISTORY) history = history.slice(0, MAX_HISTORY);
+    try {
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+    } catch (e) { /* ignore */ }
+  }
+
+  function renderQueryHistory() {
+    const list = document.getElementById('mapHistoryList');
+    const history = loadQueryHistory();
+    if (history.length === 0) {
+      list.innerHTML = '<li class="jmespath-history-empty">No previous queries</li>';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < history.length; i++) {
+      const display = history[i].query.length > 50
+        ? history[i].query.slice(0, 50) + '…'
+        : history[i].query;
+      html += '<li data-query="' + escAttr(history[i].query) + '">' + esc(display) + '</li>';
+    }
+    html += '<li class="history-clear" data-action="clear">Clear history</li>';
+    list.innerHTML = html;
+  }
+
+  function escAttr(str) {
+    return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  document.getElementById('mapHistoryBtn').addEventListener('click', function (e) {
+    e.stopPropagation();
+    const list = document.getElementById('mapHistoryList');
+    const isOpen = list.style.display === 'block';
+    if (isOpen) {
+      list.style.display = 'none';
+    } else {
+      renderQueryHistory();
+      list.style.display = 'block';
+    }
+  });
+
+  document.getElementById('mapHistoryList').addEventListener('click', function (e) {
+    const li = e.target.closest('li');
+    if (!li) return;
+    if (li.getAttribute('data-action') === 'clear') {
+      try { localStorage.removeItem(HISTORY_KEY); } catch (ex) { /* ignore */ }
+      renderQueryHistory();
+      this.style.display = 'none';
+      return;
+    }
+    const query = li.getAttribute('data-query');
+    if (!query) return;
+    setToolbarDisplay(query);
+    try { localStorage.setItem('jci-jmespath-expr', query); } catch (ex) { /* ignore */ }
+    saveQueryHistory(query);
+    this.style.display = 'none';
+    refreshView();
+  });
+
+  document.addEventListener('click', function (e) {
+    const wrap = document.querySelector('.jmespath-history-wrap');
+    if (wrap && !wrap.contains(e.target)) {
+      document.getElementById('mapHistoryList').style.display = 'none';
+    }
   });
 
   // ===================================================================
@@ -496,6 +586,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (target === 'jmespath') {
       setToolbarDisplay(value);
       try { localStorage.setItem('jci-jmespath-expr', value); } catch (ex) { /* ignore */ }
+      saveQueryHistory(value);
       closeHelp();
       refreshView();
     } else if (target === 'skip') {
