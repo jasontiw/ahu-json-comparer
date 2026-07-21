@@ -416,17 +416,96 @@ export function renderFullTree(
 //  JMESPath result renderer
 // =========================================================================
 
+// JMESPath type-code → human-readable name
+const _TYPE_NAMES = [
+  'number', 'any', 'string', 'array', 'object',
+  'boolean', 'expression', 'null', 'Array<number>', 'Array<string>',
+];
+
+/**
+ * Parse a JMESPath error into { title, detail, hint } for the UI.
+ */
+function _parseJmespathError(errMsg, expression) {
+  const m = String(errMsg);
+
+  // "expected X, received Y" — translate numeric type codes
+  const typeMatch = m.match(/expected (\d+), received (\d+)/);
+  if (typeMatch) {
+    const expected = _TYPE_NAMES[+typeMatch[1]] || '?';
+    const received = _TYPE_NAMES[+typeMatch[2]] || '?';
+    return {
+      title: 'Sort type mismatch',
+      detail: 'Expected ' + expected + ', received ' + received,
+      hint: 'Some segments have the sort field as ' + received +
+            ' instead of ' + expected +
+            '. Check for segments with null/undefined values in that field. ' +
+            'Use &not_null(field, `0`) as sort key to handle missing values.',
+    };
+  }
+
+  // "expected one of X,Y, received Z"
+  const oneOfMatch = m.match(/expected one of ([0-9, ]+), received (\d+)/);
+  if (oneOfMatch) {
+    const allowed = oneOfMatch[1].split(',').map(function (x) {
+      return _TYPE_NAMES[+x.trim()] || '?';
+    }).join(', ');
+    const received = _TYPE_NAMES[+oneOfMatch[2]] || '?';
+    return {
+      title: 'Invalid argument type',
+      detail: 'Expected one of: ' + allowed + ', but received ' + received,
+      hint: 'A field in the expression returned ' + received +
+            ' where a different type was expected. Try not_null() or filter with [?field].',
+    };
+  }
+
+  // "length() expected argument 1 to be type ... but received type null instead"
+  const funcMatch = m.match(/^(\w+)\(\) expected argument (\d+)/);
+  if (funcMatch) {
+    return {
+      title: 'Error in ' + funcMatch[1] + '()',
+      detail: m,
+      hint: 'Argument ' + funcMatch[2] + ' of ' + funcMatch[1] +
+            '() is null. Use not_null(field, `[]`) or filter with [?field].',
+    };
+  }
+
+  // Generic TypeError from sort_by first-element check
+  if (m === 'TypeError') {
+    return {
+      title: 'sort_by() type error',
+      detail: 'sort_by() could not determine the sort type from the first element.',
+      hint: 'The first element\'s sort field is null/undefined. ' +
+            'Use &not_null(field, `0`) as sort key.',
+    };
+  }
+
+  // Fallback — show raw message
+  return {
+    title: 'JMESPath error',
+    detail: m,
+    hint: '',
+  };
+}
+
 export function renderJmesPathResult(expression, filterText) {
   let leftResult, rightResult;
   try {
     leftResult = jmespath.search(state.DATA_LEFT, expression);
     rightResult = jmespath.search(state.DATA_RIGHT, expression);
   } catch (e) {
-    document.getElementById('viewLeft').innerHTML =
-      '<div class="empty-state" style="margin-top:20px;">\u26A0 Error: ' +
-      esc(e.message) +
+    var parsed = _parseJmespathError(e.message, expression);
+    var errorHtml =
+      '<div class="jmespath-error">' +
+        '<div class="jmespath-error-title">' + esc(parsed.title) + '</div>' +
+        '<div class="jmespath-error-expr">' + esc(expression) + '</div>' +
+        '<div class="jmespath-error-detail">' + esc(parsed.detail) + '</div>' +
+        (parsed.hint
+          ? '<div class="jmespath-error-hint">' + esc(parsed.hint) + '</div>'
+          : '') +
+        '<div class="jmespath-error-raw">Raw: ' + esc(e.message) + '</div>' +
       '</div>';
-    document.getElementById('viewRight').innerHTML = '';
+    document.getElementById('viewLeft').innerHTML = errorHtml;
+    document.getElementById('viewRight').innerHTML = errorHtml;
     return;
   }
 

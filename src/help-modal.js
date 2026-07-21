@@ -58,7 +58,13 @@ export function openHelp(topic) {
       '<div class="help-example"><code class="help-insert" data-insert="jmespath">unit.segmentList[?weight &gt; `0`] | sort_by(@, &amp;weight)</code><span>Filter by weight &gt; 0, then sort by weight ascending</span></div>' +
       '<div class="help-example"><code class="help-insert" data-insert="jmespath">unit.segmentList[*] | sort_by(@, &amp;geometry.x)</code><span>Sort all segments by X coordinate (ascending)</span></div>' +
       '<div class="help-example"><code class="help-insert" data-insert="jmespath">unit.segmentList[*] | sort_by(@, &amp;segmentTypeSuffix) | sort_by(@, &amp;geometry.x)</code><span>Sort by segmentTypeSuffix first, then by geometry.x (chained)</span></div>' +
-      '<div class="help-example"><code class="help-insert" data-insert="jmespath">unit.segmentList[?length(openings)] | sort_by(@, &amp;segmentTypeSuffix) | sort_by(@, &amp;geometry.x)[].{ID: id, type: segmentType, x: geometry.x}</code><span>Filter segments with openings, sort by suffix then x, reshape</span></div>' +
+      '<div class="help-example"><code class="help-insert" data-insert="jmespath">unit.segmentList[?openings &amp;&amp; length(openings)] | sort_by(@, &amp;segmentTypeSuffix) | sort_by(@, &amp;geometry.x)[].{ID: id, type: segmentType, x: geometry.x}</code><span>Filter segments WITH openings (safe null check), sort by suffix then x, reshape</span></div>' +
+      '<h4>Handle null / missing fields in sort (not_null)</h4>' +
+      '<p class="help-tip">When a sort field is missing or null on some segments, <code>sort_by</code> crashes with a "type mismatch" error. Use <code>not_null</code> to provide a default value.</p>' +
+      '<div class="help-example"><code class="help-insert" data-insert="jmespath">unit.segmentList[*] | sort_by(@, &amp;not_null(geometry.x, `0`)) | [].{id: id, x: geometry.x}</code><span>Sort by geometry.x — missing values get x=0 (appear first)</span></div>' +
+      '<div class="help-example"><code class="help-insert" data-insert="jmespath">unit.segmentList[*] | sort_by(@, &amp;not_null(geometry.x, `99999`)) | [].{id: id, x: geometry.x}</code><span>Same, but missing values get x=99999 (appear last)</span></div>' +
+      '<div class="help-example"><code class="help-insert" data-insert="jmespath">unit.segmentList[*] | sort_by(@, &amp;not_null(segmentTypeSuffix, `0`)) | sort_by(@, &amp;not_null(geometry.x, `0`)) | [].{id: id, type: segmentType, suffix: segmentTypeSuffix, x: geometry.x}</code><span>Chained double sort with not_null — safe even when fields are missing</span></div>' +
+      '<div class="help-example"><code class="help-insert" data-insert="jmespath">not_null(openings, `[]`)[*].{geometry: geometry}</code><span>Iterate over openings safely — empty array if null</span></div>' +
       '<h4>Other useful examples</h4>' +
       '<div class="help-example"><code class="help-insert" data-insert="jmespath">unit.segmentList[*].segmentType | sort(@)</code><span>Sorted unique types</span></div>' +
       '<div class="help-example"><code class="help-insert" data-insert="jmespath">unit.id</code><span>Simple scalar field</span></div>' +
@@ -69,6 +75,7 @@ export function openHelp(topic) {
       '<li><code>[?condition]</code> means "filter items where condition is true"</li>' +
       '<li>Use <strong>backticks</strong> for literal values: <code>`800`</code>, <code>`IP`</code>, <code>`true`</code></li>' +
       '<li>The query always starts from the <strong>root</strong> of the JSON, so paths begin with <code>unit.</code></li>' +
+      '<li><code>not_null(value, fallback)</code> returns <code>value</code> if not null, otherwise <code>fallback</code>. Essential when sorting fields that may be missing on some segments.</li>' +
       '<li>Press <kbd>Enter</kbd> or click <strong>Query</strong> to execute</li>' +
       '</ul>';
   }
